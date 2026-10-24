@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Snridworld</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ctext y=%2213%22 font-size=%2214%22 font-family=%22monospace%22 fill=%22%23b77a2e%22%3E@%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root { --ink: #2b3442; --soft: #7d8a9b; --paper: rgba(250,247,240,.88); --line: rgba(70,140,235,.2); --blue: 70, 140, 235; --page: #dcd7ca; }
+  :root[data-theme="dark"] { --ink: #dfe6ef; --soft: #8e9bb0; --paper: rgba(14,19,26,.88); --line: rgba(110,170,255,.25); --page: #080b10; }
+  html, body {
+    margin: 0; height: 100%; background: var(--page); overflow: hidden;
+    touch-action: none; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; color: var(--ink);
+    font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0;
+  }
+  #scene { position: fixed; inset: 0; cursor: grab; touch-action: none; }
+  #scene.over { cursor: pointer; }
+  #scene.grabbing { cursor: grabbing; }
+  :root[data-theme="dark"] #cast b, :root[data-theme="dark"] #card b, :root[data-theme="dark"] #tip b, :root[data-theme="dark"] #tip span[style] { filter: brightness(1.4); }
+
+  .panel { background: var(--paper); border: 1px solid var(--line); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  button { font: inherit; color: inherit; background: transparent; border: 1px solid transparent; cursor: pointer; }
+  button:hover { border-color: var(--line); }
+  button.on { background: rgba(var(--blue), .16); }
+  i { font-style: normal; color: var(--soft); }
+  .mono { white-space: pre; }
+  .dim { color: var(--soft); }
+
+  #title { position: fixed; left: 12px; top: 12px; z-index: 5; padding: 7px 10px 8px; font-size: 11px; }
+  #title h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: .03em; }
+  #title h1 span { color: rgba(var(--blue), .8); }
+  #sub { color: var(--soft); margin: 1px 0 6px; }
+  #wx .hist { letter-spacing: .45em; font-weight: 700; margin-bottom: 3px; }
+  #wx .w0 { color: #d39a2a; } #wx .w1 { color: #8090a4; } #wx .w2 { color: #3f7fd6; } #wx .w3 { color: #a2adbb; }
+  #wx table { border-collapse: collapse; font-size: 10.5px; }
+  #wx th { font-weight: 400; color: var(--soft); padding: 0 4px; text-align: center; }
+  #wx td { padding: 1px 5px; text-align: center; white-space: pre; color: var(--soft); }
+  #wx td:first-child { text-align: left; padding-left: 0; }
+  #wx tr.now td { color: var(--ink); font-weight: 700; }
+  #wx .roll { color: var(--soft); margin-top: 4px; font-size: 10.5px; }
+  #wx .roll span { white-space: pre; }
+
+  #side { position: fixed; right: 12px; top: 12px; z-index: 5; width: 300px; display: flex; flex-direction: column; gap: 6px; font-size: 11px; }
+  #cast { display: flex; flex-direction: column; padding: 3px; }
+  #cast .hd { padding: 2px 6px 3px; font-weight: 700; color: rgba(var(--blue), .9); border-bottom: 1px dashed var(--line); margin-bottom: 2px; }
+  #cast .hd i { font-weight: 400; }
+  #cast button { text-align: left; padding: 2px 6px; white-space: pre; display: flex; gap: 2px; }
+  #cast button i { width: 6.5em; }
+  #cast button span { margin-left: auto; color: var(--soft); }
+  #card { padding: 7px 10px 8px; line-height: 1.5; cursor: pointer; }
+  #card .tg { float: right; color: var(--soft); font-weight: 400; }
+  #card .ln { color: var(--soft); }
+  #card .plot { margin-top: 4px; }
+  #card .plot pre { margin: 1px 0 0; font: inherit; line-height: 1.05; color: rgba(var(--blue), .9); }
+  #cast .eggs { padding: 3px 6px 2px; border-top: 1px dashed var(--line); margin-top: 2px; color: #b8a070; white-space: pre; }
+  #card .nm { font-size: 12.5px; font-weight: 700; }
+  #card .nm i { font-weight: 400; }
+  #card .blurb { color: var(--soft); margin-bottom: 4px; }
+  #card .brain { margin-bottom: 4px; }
+  #card .brain u { text-decoration: none; color: rgba(var(--blue), .9); }
+  #card .spk .mono { letter-spacing: .05em; }
+  #card .bad { color: #c0404a; }
+  #card .rw { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; margin-top: 5px; padding-top: 5px; border-top: 1px dashed var(--line); color: var(--soft); }
+  #card .rw span:last-child { grid-column: 1 / -1; }
+  #card .rw em { font-style: normal; display: inline-block; width: 3.4em; color: var(--ink); white-space: pre; }
+
+  #tools {
+    position: fixed; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 5;
+    display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch; gap: 3px;
+    padding: 5px; max-width: calc(100vw - 32px); box-sizing: border-box; font-size: 11px;
+  }
+  #tools button { padding: 3px 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+  #tools pre { margin: 0; font: inherit; font-size: 13px; font-weight: 700; color: #3f7f3a; }
+  #tools span { font-size: 9.5px; color: var(--soft); }
+  #tools .sep { width: 1px; background: var(--line); margin: 3px 2px; }
+  #tools pre { white-space: pre; }
+  #tools .mb pre { color: var(--soft); }
+  #menu {
+    position: fixed; z-index: 8; display: none; flex-direction: column; align-items: stretch;
+    padding: 4px; min-width: 210px; font-size: 11px;
+  }
+  #menu.show { display: flex; }
+  #menu button { text-align: left; padding: 4px 8px; flex-direction: row; justify-content: flex-start; gap: 0; display: block; }
+  #menu button b { display: inline-block; min-width: 4.4em; color: rgba(var(--blue), .9); font-weight: 700; }
+  #menu .hint { color: var(--soft); font-size: 9.5px; padding: 5px 8px 2px; border-top: 1px dashed var(--line); margin-top: 3px; }
+
+  #tip {
+    position: fixed; left: 0; top: 0; z-index: 9; pointer-events: none; padding: 5px 8px;
+    font-size: 10.5px; line-height: 1.45; opacity: 0; transition: opacity .2s; max-width: 280px;
+  }
+  #tip.show { opacity: 1; }
+
+  @media (max-width: 760px) {
+    #side { width: 230px; }
+    #card .rw, #card .blurb, #wx table { display: none; }
+  }
+  @media (max-width: 560px) {
+    #title { left: 8px; top: 8px; font-size: 10px; padding: 5px 7px; }
+    #title h1 { font-size: 14px; }
+    #wx .roll { display: none; }
+    #side { top: 8px; right: 8px; width: auto; font-size: 10px; }
+    #cast button i, #cast button span, #card { display: none; }
+    #cast .hd i, #cast .eggs i { display: none; }
+    #title { max-width: 44vw; }
+    #tools {
+      left: 8px; right: 8px; bottom: 8px; transform: none; max-width: none;
+      flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; font-size: 10px;
+    }
+    #tools button { padding: 2px 6px; white-space: nowrap; flex: none; }
+    #tools button span { font-size: 8.5px; }
+    #tools pre { font-size: 11px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="scene"></canvas>
+
+<div id="title" class="panel">
+  <h1><span>_(@)"</span> snridworld</h1>
+  <div id="sub"></div>
+  <div id="wx"></div>
+</div>
+
+<div id="side">
+  <div id="cast" class="panel"></div>
+  <div id="card" class="panel"></div>
+</div>
+
+<div id="tools" class="panel"></div>
+<div id="menu" class="panel"></div>
+<div id="tip" class="panel"></div>
+
+<script type="module" src="js/grid/main.js"></script>
+</body>
+</html>
