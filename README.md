@@ -2,6 +2,8 @@
 
 `_(@)"` a markov garden, drawn entirely in ascii.
 
+**play it at [snail.brezgis.com](https://snail.brezgis.com)**
+
 A gridworld where everything is a little Markov process: the tiles, the weather, the food, and the snails
 that live there. The snails are **snagents** (snail agents). Some of them plan with value iteration, some learn
 by bumping into things, and one of them is Dot, an honorary **snladybug** who just wanders.
