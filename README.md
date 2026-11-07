@@ -41,7 +41,7 @@ Learners show `?` where they have never been.
 
 **Life in the garden.** Ripe food gives off scent that drifts about five squares; snagents who smell it
 say "smell that?" and head over, and when two of them race for the same cucumber the winner says "mine!"
-and the other says "aw". A hungry planner that knows of no food goes foraging, roaming until it catches a scent. Days and nights cycle: at night snagents curl up and sleep, and fireflies come out.
+and the other says "aw". A hungry snagent that knows of no food goes foraging, roaming until it catches a scent. Days and nights cycle: at night snagents curl up and sleep, and fireflies come out.
 
 ![night in the dark garden](screenshots/night.png)
 
@@ -57,7 +57,9 @@ snagent's card has a little ascii learning curve, so you can watch the learners 
 | --- | --- |
 | drag, scroll, arrow keys | wander the garden |
 | click a snagent (or a name) | select it, `Tab` cycles, `f` follows |
-| click the ground | use the current tool: `1` cucumber, `2` strawberry, `3` lavender, `4` water, `5` moss |
+| `1`–`5`, or click a tool | pick up a tool (`1` cucumber, `2` strawberry, `3` lavender, `4` water, `5` moss); the same key, a second click, or `Esc` puts it away |
+| click a `└ snabies` line | open or fold a parent's snabies in the list (they get their own row once grown) |
+| click the ground | with a tool in hand, place it there; with empty hands, nothing happens (click a snail to meet it) |
 | `[=] menu`, or the keys: | |
 | `v` | beliefs: values, then policy arrows, then off |
 | `w` | force a weather roll |

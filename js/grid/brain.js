@@ -5,6 +5,12 @@ import { T } from './world.js';
 export const DIRS = [[0, -1], [1, 0], [0, 1], [-1, 0], [0, 0]];   // N E S W stay
 export const TAG = { OK: 0, STUCK: 1, VEER: 2, SLIP: 3, BUMP: 4, STAY: 5 };
 export const GAMMA = .94;
+// crawling into a wall (or off the garden) is a small waste of effort. without it, bumping ties with staying
+// put, so a snail parked by the rim kept pointing its policy off the map and bonking the edge
+export const BUMP_COST = .06;
+// sitting still is a little boring (and makes you hungrier). without it a snail on a neutral dead end valued
+// staying at 0 forever over crossing any dry soil, and parked there
+export const STAY_COST = .03;
 const K = 3;   // at most three outcomes per (state, action)
 
 // P(s' | s, a) for the current terrain, flattened so value iteration does not allocate
@@ -72,13 +78,14 @@ export class Planner {
   constructor(n) { this.kind = 'plan'; this.V = new Float32Array(n); this.V2 = new Float32Array(n); this.Q = new Float32Array(n * 5); this.eps = .03; }
   // term[s] = 1 where a meal waits: reaching it is a goal, so the future is cut there (classic gridworld terminal)
   sweep(model, rew, term) {
-    const { V, V2, Q } = this, { ns, np } = model, w = model.w;
+    const { V, V2, Q } = this, { ns, np, tag } = model, w = model.w;
     for (let s = 0; s < w.n; s++) {
       if (!w.pass(s)) { V2[s] = 0; continue; }
       let best = -1e9;
       for (let a = 0; a < 5; a++) {
         const o = (s * 5 + a) * K; let q = 0;
-        for (let k = 0; k < K; k++) { const p = np[o + k]; if (p) { const j = ns[o + k]; q += p * (rew[j] + (term[j] ? 0 : GAMMA * V[j])); } }
+        for (let k = 0; k < K; k++) { const p = np[o + k]; if (p) { const j = ns[o + k]; q += p * (rew[j] - (tag[o + k] === TAG.BUMP ? BUMP_COST : 0) + (term[j] ? 0 : GAMMA * V[j])); } }
+        if (a === 4) q -= STAY_COST;
         Q[s * 5 + a] = q; if (q > best) best = q;
       }
       V2[s] = best;

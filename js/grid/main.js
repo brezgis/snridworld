@@ -2,7 +2,7 @@
 // rots on its own chain, and the snails are little MDP snagents: some plan with value iteration, some learn by
 // bumping into things. they smell food, race for it, sleep at night and lay eggs that inherit their brains.
 import { World, T, TILE, W, WEATHER, WP, FOOD, STAGE, MOVE_NOTE, NB4, makeFood } from './world.js';
-import { Model, Planner, Learner, Wanderer, DIRS, TAG, GAMMA } from './brain.js';
+import { Model, Planner, Learner, Wanderer, DIRS, TAG, GAMMA, BUMP_COST, STAY_COST } from './brain.js';
 import { makeTextures, hsh } from './textures.js';
 import { THEME, C, bright, ui as uiPal } from './theme.js';
 import { makeNoise, fbm, mulberry32, clamp, lerp, pick, rand, mirror, hex } from '../util.js';
@@ -12,7 +12,7 @@ const $ = s => document.querySelector(s);
 const cv = $('#scene'), ctx = cv.getContext('2d');
 const L = {};
 const S = {
-  t: 0, sim: 0, speed: 1, paused: false, view: 0, tool: 'cucumber', test: location.search.includes('test'),
+  t: 0, sim: 0, speed: 1, paused: false, view: 0, tool: null, kids: new Set(), seenSel: -1, test: location.search.includes('test'),
   tickT: 0, wxT: 0, sweepT: 0, tintT: 1, waterT: 1, atmoT: 1, overT: 1, uiT: 1, night: 0, cardOpen: false,
   hover: -1, mx: -1, my: -1, lv: [0, 1, 0, 0],   // smoothed weather levels: sun cloud rain fog
   camX: 0, camY: 0, goal: null, drag: null, follow: false, menu: false,
@@ -197,7 +197,7 @@ function makeSnagent(def, s, brain) {
     s, from: s, to: s, act: 4, tag: TAG.STAY, state: 'idle', mt: 0, dur: 1, wait: rand(.2, 1.5),
     face: Math.random() < .5 ? 1 : -1, phase: 0, hunger: rand(.2, .6), ret: 0, steps: 0, hist: [], curve: [],
     say: null, sayCD: rand(4, 14), shock: 0, blink: 0, blinkT: rand(2, 6), eatT: 0, pace: rand(.85, 1.15),
-    knows: new Set(), meals: 0, eggCD: rand(150, 240), age: def.baby ? 0 : 1e9, sleepT: 0, zT: 0, gen: def.gen || 1,
+    knows: new Set(), meals: 0, stillT: 0, lastS: s, stroll: 0, blocked: false, eggCD: rand(150, 240), age: def.baby ? 0 : 1e9, sleepT: 0, zT: 0, gen: def.gen || 1,
   };
 }
 const newBrain = k => k === 'plan' ? new Planner(world.n) : k === 'dyna' ? new Learner(world.n, 25) : k === 'q' ? new Learner(world.n, 0) : new Wanderer(world.n);
@@ -208,7 +208,7 @@ function spawnSnagents() {
   // random good spots), seeded so a given garden always starts the same way
   const r = mulberry32(seed ^ 0x5a17), taken = [];
   const good = i => world.pass(i) && world.type[i] !== T.LAVENDER && world.type[i] !== T.PUDDLE
-    && world.edge(i % world.cols + .5, (i / world.cols | 0) + .5) > .12;
+    && world.edge(i % world.cols + .5, (i / world.cols | 0) + .5) > .25 && openness(i) === 4;   // inland, not against the rim
   const pool = [...Array(world.n).keys()].filter(good);
   const comfy = pool.filter(i => world.type[i] === T.MOSS || world.type[i] === T.LUSH || world.type[i] === T.DAMP);
   for (const def of CAST) {
@@ -278,6 +278,20 @@ function stepToward(s, goal) {
     if (!world.pass(j) || world.type[j] === T.LAVENDER) continue;
     const d = Math.abs(gx - (sx + DIRS[a][0])) + Math.abs(gy - (sy + DIRS[a][1]));
     if (d < Math.abs(gx - sx) + Math.abs(gy - sy)) opts.push(a);
+  }
+  return opts.length ? pick(opts) : -1;
+}
+
+// how open a tile is: the number of crawlable neighbours (4 in the open, fewer against the rim or a rock)
+const openness = j => NB4.reduce((n, [dx, dy]) => { const k = world.nb(j, dx, dy); return n + (world.pass(k) && world.type[k] !== T.LAVENDER ? 1 : 0); }, 0);
+// a step onto open ground; uniform = true picks any open neighbour, otherwise roomier tiles are likelier
+function inward(a, uniform = false) {
+  const opts = [];
+  for (let d = 0; d < 4; d++) {
+    const j = world.nb(a.s, DIRS[d][0], DIRS[d][1]);
+    if (!world.pass(j) || world.type[j] === T.LAVENDER || occupied(j, a)) continue;
+    const w = uniform ? 1 : (1 + openness(j)) ** 2;
+    for (let k = 0; k < w; k++) opts.push(d);
   }
   return opts.length ? pick(opts) : -1;
 }
@@ -492,14 +506,22 @@ function decide(a) {
     const g = nearestKnown(a);
     if (g >= 0 && tdist(s, g) <= SMELL + 2) act = stepToward(s, g);
   }
-  if (act < 0 && a.brain === 'plan' && a.hunger > .75 && nearestKnown(a) < 0 && Math.random() < .35) {
+  if (act < 0 && a.brain !== 'random' && a.hunger > .75 && nearestKnown(a) < 0 && Math.random() < .35) {
     act = Math.floor(Math.random() * 4);   // foraging: roam until a scent turns up
     if (Math.random() < .15) setSay(a, pick(['so hungry', 'anything to eat?', 'foraging', 'sniff...']));
   }
+  // restless: anyone who has sat still a long while (awake, nothing to chase) takes a little stroll inward,
+  // so nobody stays parked against the rim
+  if (act < 0 && (a.stroll > 0 || a.stillT > 24)) {
+    if (a.stroll <= 0) { a.stroll = 2 + Math.floor(Math.random() * 3); a.stillT = 0; if (a.brain !== 'random' && Math.random() < .4) setSay(a, pick(['stretch', 'little walk', 'enough sitting', 'onward'])); }
+    a.stroll--; act = inward(a);
+  }
+  if (act < 0 && a.brain === 'random') act = inward(a, true);   // dot's walk: a uniform pick among open neighbours
   if (act < 0) act = b.act(s);
   let [ns, tag] = model.sample(s, act);
+  a.blocked = false;
   if (ns !== s && occupied(ns, a)) {
-    ns = s; tag = TAG.BUMP;
+    ns = s; tag = TAG.BUMP; a.blocked = true;
     if (a.brain !== 'random' && Math.random() < .35) setSay(a, pick(['oh, sorry', 'after you', 'excuse me', 'hi :)']));
   }
   a.act = act; a.tag = tag; a.from = s; a.to = ns; a.mt = 0;
@@ -521,11 +543,11 @@ function arrive(a) {
   const from = a.from, s = a.s = a.to, b = a.brainObj;
   if (a.brain === 'random') { b.visit(s); a.steps++; a.state = 'idle'; a.wait = rand(0, .25); return; }
   const moved = s !== from, meal = moved && ripe(s);
-  const r = rewOf(a, s, moved);
+  const r = rewOf(a, s, moved) - (a.tag === TAG.BUMP && !a.blocked ? BUMP_COST : 0) - (a.act === 4 ? STAY_COST : 0);
   a.ret += r; a.steps++; a.hist.push(r); if (a.hist.length > 48) a.hist.shift();
   if (a.steps % 8 === 0) { const h = a.hist.slice(-24); a.curve.push(h.reduce((x, y) => x + y, 0) / h.length); if (a.curve.length > 80) a.curve.shift(); }
   const [gx, gy] = tileCenter(s);
-  if (b.kind === 'learn') {
+  if (b.kind === 'learn' && !a.blocked) {   // a snail in the way is not a fact about the garden: do not learn from it
     const before = b.learn(from, a.act, r, s, meal);
     if (before && before[0] > .8 && r < .3 && Math.random() < .7) setSay(a, pick(["where'd it go?", 'it was HERE', 'hm. gone.']), true);
   }
@@ -577,7 +599,7 @@ function hatch(e) {
   const [r0, g0, b0] = hex(p.shell), j = () => Math.round(rand(-18, 18));
   const shell = '#' + [r0 + j(), g0 + j(), b0 + j()].map(v => clamp(v, 30, 230).toString(16).padStart(2, '0')).join('');
   const a = makeSnagent({
-    name, pr: pick(['he', 'she']), brain: p.brain, shell, spiral: p.spiral, role: `${p.name}'s snaby`, fav: Math.random() < .7 ? p.fav : pick(['cucumber', 'berry', 'mushroom']),
+    name, pr: pick(['he', 'she']), brain: p.brain, shell, spiral: p.spiral, role: `${p.name}'s snaby`, parent: p, fav: Math.random() < .7 ? p.fav : pick(['cucumber', 'berry', 'mushroom']),
     blurb: `hatched from an egg. inherited a fuzzy copy of ${p.name}'s brain and tastes.`, baby: true, gen: p.gen + 1,
     Rarr: p.R.map((v, t) => t === T.LAVENDER || t === T.VOID ? v : v + rand(-.03, .03)), foodMul: +(p.foodMul * rand(.85, 1.15)).toFixed(2),
   }, e.s, b);
@@ -605,6 +627,8 @@ function updateSnagent(a, dt) {
     const k = world.type[a.s], lines = [...(LINES[k] || []), ...(LINES[world.weather] || []), ...LINES[a.brain], ...(a.brain === 'random' ? [] : LINES.idle), ...(S.night > .5 ? LINES.night : [])];
     if (a.brain !== 'random' || Math.random() < .3) setSay(a, pick(lines)); else a.sayCD = rand(10, 20);
   }
+  if (a.state !== 'sleep' && a.state !== 'eat' && a.s === a.lastS) a.stillT += dt; else a.stillT = 0;
+  a.lastS = a.s;
   if (a.state === 'sleep') {
     a.sleepT -= dt;
     if ((a.zT -= dt) < 0) {
@@ -675,10 +699,18 @@ function snagentArt(a) {
   return { lines, mask, colors, dx, dy: 0 };
 }
 
-// glyphs cut out of the ground with a soft halo in the paper colour, instead of white boxes
+// glyphs cut out of the ground with a soft halo in the paper colour, instead of white boxes. on the dark earth it
+// takes two passes: a wide soft shadow of deeper earth, then a crisp rim, so light glyphs lift off busy moss
+function cut(c, text, x, y, w = 4.2) {
+  c.lineJoin = 'round';
+  if (THEME.dark) {
+    c.strokeStyle = 'rgba(20,17,14,.5)'; c.lineWidth = w + 3.4; c.strokeText(text, x, y);
+    c.strokeStyle = 'rgba(28,24,20,.96)'; c.lineWidth = w - .4; c.strokeText(text, x, y);
+  } else { c.strokeStyle = uiPal().halo; c.lineWidth = w; c.strokeText(text, x, y); }
+}
 function drawArt(c, art, col, row, alpha = 1) {
-  c.font = L.BOLD; c.globalAlpha = alpha; c.lineJoin = 'round'; c.lineWidth = 4.2; c.strokeStyle = uiPal().halo;
-  art.lines.forEach((ln, r) => { for (let i = 0; i < ln.length; i++) if (ln[i] !== ' ') c.strokeText(ln[i], (col + i) * L.CW, (row + r) * L.CH); });
+  c.font = L.BOLD; c.globalAlpha = alpha;
+  art.lines.forEach((ln, r) => { for (let i = 0; i < ln.length; i++) if (ln[i] !== ' ') cut(c, ln[i], (col + i) * L.CW, (row + r) * L.CH); });
   art.lines.forEach((ln, r) => {
     for (let i = 0; i < ln.length; i++) {
       if (ln[i] === ' ') continue;
@@ -688,22 +720,42 @@ function drawArt(c, art, col, row, alpha = 1) {
   c.globalAlpha = 1; c.font = L.FONT;
 }
 function bubble(c, text, cx, row, col, alpha) {
-  c.font = L.BOLD; c.lineJoin = 'round'; c.lineWidth = 4;
+  c.font = L.BOLD;
   const x0 = Math.round(cx - text.length / 2) * L.CW, y = row * L.CH;
   c.globalAlpha = alpha;
-  c.strokeStyle = uiPal().halo; c.strokeText(text, x0, y);
+  cut(c, text, x0, y, 4);
   c.fillStyle = C(col); c.fillText(text, x0, y);
   c.globalAlpha = 1; c.font = L.FONT;
 }
-// a gentle pool of light under the selected snagent, so you can always find them
-function drawPool(c, a) {
-  const p = artPos(a), x = (p.col + 2.5) * L.CW, y = (p.row + 1) * L.CH, R = 4.2 * L.CW * 3.2;
-  c.save(); c.translate(x, y); c.scale(1, .62);
-  const g = c.createRadialGradient(0, 0, 0, 0, 0, R);
-  const [r, gg, b] = hex(a.shell);
-  if (THEME.dark) { g.addColorStop(0, `rgba(${r},${gg},${b},.24)`); g.addColorStop(.5, `rgba(${r},${gg},${b},.09)`); g.addColorStop(1, `rgba(${r},${gg},${b},0)`); }
-  else { g.addColorStop(0, 'rgba(255,253,242,.82)'); g.addColorStop(.45, 'rgba(255,252,240,.4)'); g.addColorStop(1, 'rgba(255,252,240,0)'); }
-  c.fillStyle = g; c.beginPath(); c.arc(0, 0, R, 0, Math.PI * 2); c.fill();
+// where a snagent really is, between tiles (unsnapped), for light that glides instead of hopping
+function glidePos(a) {
+  const fx = a.from % world.cols, fy = a.from / world.cols | 0, tx = a.to % world.cols, ty = a.to / world.cols | 0;
+  let k = a.state === 'move' ? clamp(a.mt, 0, 1) : 1;
+  if (a.state === 'move' && a.tag === TAG.BUMP) k = 0;
+  k = k * k * (3 - 2 * k);
+  return [(lerp(fx, tx, k) * TW + 3.5) * L.CW, (lerp(fy, ty, k) * TH + 1.6) * L.CH];
+}
+// the selected snagent walks in a soft warm spotlight that breathes a little; everyone else keeps a faint glow
+// of their own shell colour, so the garden shows where its snails are at a glance
+function drawPool(c, a, selected) {
+  const [x, y] = glidePos(a), small = a.brain === 'random' || a.age < GROW;
+  const [r, gg, b] = hex(a.shell), breath = 1 + .05 * Math.sin(S.t * 1.7);
+  c.save(); c.translate(x, y); c.scale(1, .58);
+  if (selected) {
+    const R = (small ? 9 : 11.5) * L.CW * breath, g = c.createRadialGradient(0, 0, 0, 0, 0, R);
+    if (THEME.dark) {
+      g.addColorStop(0, 'rgba(255,232,188,.2)'); g.addColorStop(.25, `rgba(${r},${gg},${b},.16)`);
+      g.addColorStop(.6, `rgba(${r},${gg},${b},.06)`); g.addColorStop(1, `rgba(${r},${gg},${b},0)`);
+    } else { g.addColorStop(0, 'rgba(255,253,242,.85)'); g.addColorStop(.45, 'rgba(255,250,232,.42)'); g.addColorStop(1, 'rgba(255,248,228,0)'); }
+    c.fillStyle = g; c.beginPath(); c.arc(0, 0, R, 0, Math.PI * 2); c.fill();
+    // a thin dotted ring at the spotlight's edge, like a stage mark
+    c.setLineDash([2, 5]); c.lineWidth = 1.2; c.strokeStyle = `rgba(${r},${gg},${b},${THEME.dark ? .32 : .4})`;
+    c.beginPath(); c.arc(0, 0, R * .62, 0, Math.PI * 2); c.stroke(); c.setLineDash([]);
+  } else {
+    const R = (small ? 4.5 : 6) * L.CW, g = c.createRadialGradient(0, 0, 0, 0, 0, R);
+    g.addColorStop(0, `rgba(${r},${gg},${b},${THEME.dark ? .12 : .1})`); g.addColorStop(1, `rgba(${r},${gg},${b},0)`);
+    c.fillStyle = g; c.beginPath(); c.arc(0, 0, R, 0, Math.PI * 2); c.fill();
+  }
   c.restore();
 }
 
@@ -972,7 +1024,8 @@ function render(dt) {
     ctx.fillStyle = THEME.dark ? `rgba(14,20,44,${(.34 * S.night).toFixed(3)})` : `rgba(28,38,80,${(.3 * S.night).toFixed(3)})`;
     ctx.fillRect(0, 0, cv.width, cv.height); worldT(ctx);
   }
-  drawPool(ctx, snagents[sel]);
+  snagents.forEach((a, i) => { if (i !== sel) drawPool(ctx, a, false); });
+  drawPool(ctx, snagents[sel], true);
   for (const a of snagents) drawClearing(ctx, a);
   drawIntent(ctx, snagents[sel]);
   const order = snagents.map((a, i) => [a, i, artPos(a)]).sort((p, q) => p[2].row - q[2].row);
@@ -982,12 +1035,12 @@ function render(dt) {
   for (const [a, i, p] of order) {
     const cx = p.col + 2.5;
     if (a.say) bubble(ctx, a.say.text, cx, p.row - 1, pal.ink, clamp(Math.min(a.say.t * 6, (2.6 - a.say.t) * 2), 0, 1));
-    else if (i === sel) bubble(ctx, a.name, cx, p.row - 1, a.shell, .6 + .25 * Math.sin(S.t * 3));
+    else if (i === sel) bubble(ctx, a.name, cx, p.row - 1, bright(a.shell), .75 + .2 * Math.sin(S.t * 3));
   }
-  ctx.font = L.BOLD; ctx.lineJoin = 'round'; ctx.lineWidth = 3.4; ctx.strokeStyle = pal.halo;
+  ctx.font = L.BOLD;
   for (const f of floats) {
     ctx.globalAlpha = clamp(1.6 - f.t, 0, 1);
-    ctx.strokeText(f.text, f.x, f.y - f.t * 18);
+    cut(ctx, f.text, f.x, f.y - f.t * 18, 3.4);
     ctx.fillStyle = C(f.col); ctx.fillText(f.text, f.x, f.y - f.t * 18);
   }
   ctx.globalAlpha = 1;
@@ -996,6 +1049,13 @@ function render(dt) {
     const X = (S.hover % world.cols) * TW, Y = (S.hover / world.cols | 0) * TH;
     ctx.fillStyle = C('rgba(70,140,235,.9)');
     for (const [dx, dy, ch] of [[0, 0, '.'], [6, 0, '.'], [0, 2, "'"], [6, 2, "'"]]) ctx.fillText(ch, (X + dx) * L.CW, (Y + dy) * L.CH);
+    const tool = TOOLS.find(t => t.id === S.tool);
+    if (tool) {   // a ghost of what you are holding, on the tile it would land on
+      ctx.font = L.BOLD; ctx.globalAlpha = .55 + .2 * Math.sin(S.t * 5);
+      const x = (X + 3.5 - tool.icon.length / 2) * L.CW, y = (Y + 1) * L.CH;
+      cut(ctx, tool.icon, Math.round(x / L.CW) * L.CW, y, 3.6); ctx.fillStyle = C('#3f7f3a'); ctx.fillText(tool.icon, Math.round(x / L.CW) * L.CW, y);
+      ctx.globalAlpha = 1;
+    }
   }
   ctx.font = L.FONT;
 }
@@ -1067,7 +1127,7 @@ function mood(a) {
   const g = nearestKnown(a);
   if (g >= 0) return `smells ${FOOD[world.food[g].kind].name}`;
   if (a.age < GROW) return 'a snaby';
-  if (a.hunger > .75) return a.brain === 'plan' ? 'hungry, foraging' : 'hungry';
+  if (a.hunger > .75) return 'hungry, foraging';
   // a calm word that changes every few seconds (not on every panel refresh)
   return ['pottering', 'wandering', 'content'][(Math.floor(S.sim / 9) + a.name.length) % 3];
 }
@@ -1087,9 +1147,11 @@ function ui() {
   h += `<div class="roll">${lr ? `rolled ${WEATHER[lr.from].name} &rarr; ${WEATHER[lr.to].name} (p ${pf(lr.p)})` : 'first roll soon'} <span>${bar(S.wxT / 7, 7)}</span></div>`;
   setHTML($('#wx'), h);
 
-  setHTML($('#cast'), `<div class="hd">${snagents.length} snagents <i>(snail agents. dot is an honorary snladybug)</i></div>` + snagents.map((a, i) =>
-    `<button data-i="${i}" class="${i === sel ? 'on' : ''}"><b style="color:${a.shell}">${esc(pad(shellArt(a), 5))}</b> ${pad(a.name, 8)}<i>${a.state === 'sleep' ? 'zz' : brainName(a)}</i> <span>${a.brain === 'random' ? a.steps + ' st' : fmt(a.ret)}</span></button>`).join('')
-    + (eggs.length ? `<div class="eggs">${eggs.map(e => `O <i>${e.parent.name}'s egg ${bar(e.t / e.hatch, 6)} snaby soon</i>`).join('<br>')}</div>` : ''));
+  setHTML($('#cast'), castHTML());
+  if (S.seenSel !== sel) {   // keep the selected snagent in view in a long, scrolling list
+    S.seenSel = sel;
+    $('#cast .list button.on')?.scrollIntoView({ block: 'nearest' });
+  }
 
   const a = snagents[sel], b = a.brainObj;
   let c = `<div class="nm"><b style="color:${a.shell}">${esc(shellArt(a))}</b> ${a.name} <i>${a.role}</i> <span class="tg">${S.cardOpen ? '[-]' : '[+]'}</span></div>`;
@@ -1116,7 +1178,10 @@ function ui() {
   }
   setHTML($('#card'), c);
 
-  setHTML($('#tools'), TOOLS.map(t => `<button data-tool="${t.id}" class="${S.tool === t.id ? 'on' : ''}"><pre>${esc(t.icon)}</pre><span>${t.key} ${t.label}</span></button>`).join('')
+  const armed = TOOLS.find(t => t.id === S.tool);
+  setHTML($('#tools'), `<div class="th">${armed ? `<b>${armed.label}</b> in hand: click the garden to place it · <b>${armed.key}</b> or <b>esc</b> puts it away`
+    : 'pick a tool to plant or water · click a snail to meet it'}</div>`
+    + TOOLS.map(t => `<button data-tool="${t.id}" class="${S.tool === t.id ? 'on armed' : ''}" title="${S.tool === t.id ? 'put away' : 'pick up'} the ${t.label}"><pre>${esc(t.icon)}</pre><span>${t.key} ${t.label}</span></button>`).join('')
     + '<div class="sep"></div>'
     + `<button data-k="menu" class="mb ${S.menu ? 'on' : ''}"><pre>${S.menu ? '[x]' : '[=]'}</pre><span>menu</span></button>`);
   const menu = $('#menu');
@@ -1129,12 +1194,32 @@ function ui() {
       + `<button data-k="+"><b>- +</b> speed x${S.speed}</button>`
       + `<button data-k="d"><b>d</b> ${THEME.dark ? 'light' : 'dark'} mode</button>`
       + `<button data-k="n"><b>n</b> a new garden</button>`
-      + '<div class="hint">drag to wander · click a snagent · tab cycles</div>');
+      + '<div class="hint">drag to wander · click a snagent · tab cycles<br>1-5 pick up a tool · esc puts it away</div>');
     const r = $('#tools button[data-k="menu"]').getBoundingClientRect(), w = menu.offsetWidth;
     menu.style.left = clamp(r.right - w, 8, innerWidth - w - 8) + 'px';
     menu.style.bottom = (innerHeight - $('#tools').getBoundingClientRect().top + 6) + 'px';
   }
   tip();
+}
+
+// the cast list: grown-ups get a row each; snabies tuck under their parent as one compact line that opens
+// on click. the list scrolls once it outgrows the panel
+const isSnaby = a => a.parent && a.age < GROW && snagents.includes(a.parent);
+function castHTML() {
+  const row = (a, i, kid) => `<button data-i="${i}" class="${i === sel ? 'on' : ''}${kid ? ' kid' : ''}">${kid ? '<i class="tw">└</i>' : ''}<b style="color:${a.shell}">${esc(pad(shellArt(a), kid ? 3 : 5))}</b> ${pad(a.name, 8)}<i>${a.state === 'sleep' ? 'zz' : kid ? 'snaby' : brainName(a)}</i> <span>${a.brain === 'random' ? a.steps + ' st' : fmt(a.ret)}</span></button>`;
+  const cur = snagents[sel];
+  if (cur && isSnaby(cur)) S.kids.add(cur.parent.name);   // a selected snaby always shows
+  let h = '';
+  snagents.forEach((a, i) => {
+    if (isSnaby(a)) return;
+    h += row(a, i, false);
+    const kids = snagents.map((k, j) => [k, j]).filter(([k]) => isSnaby(k) && k.parent === a);
+    if (!kids.length) return;
+    if (S.kids.has(a.name)) h += kids.map(([k, j]) => row(k, j, true)).join('') + `<button class="grp" data-kids="${esc(a.name)}"><i class="tw">└</i><i>hide snabies</i></button>`;
+    else h += `<button class="grp" data-kids="${esc(a.name)}"><i class="tw">└</i>${kids.length} snab${kids.length > 1 ? 'ies' : 'y'}: ${kids.map(([k]) => `<b style="color:${k.shell}">${esc(k.spiral)}"</b>`).join(' ')}</button>`;
+  });
+  return `<div class="hd">${snagents.length} snagents <i>(snail agents. dot is an honorary snladybug)</i></div><div class="list">${h}</div>`
+    + (eggs.length ? `<div class="eggs">${eggs.map(e => `O <i>${e.parent.name}'s egg ${bar(e.t / e.hatch, 6)} snaby soon</i>`).join('<br>')}</div>` : '');
 }
 
 function tip() {
@@ -1222,7 +1307,7 @@ const KEYS = {
   'd': () => setTheme(!THEME.dark),
   'f': () => { S.follow = !S.follow; if (S.follow) lookAt(snagents[sel].s); },
   'menu': () => { S.menu = !S.menu; },
-  'Escape': () => { S.menu = false; },
+  'Escape': () => { S.menu = false; S.tool = null; },
   'Tab': () => select((sel + 1) % snagents.length, true),
   'ArrowLeft': () => pan(-180, 0), 'ArrowRight': () => pan(180, 0), 'ArrowUp': () => pan(0, -140), 'ArrowDown': () => pan(0, 140),
 };
@@ -1234,7 +1319,7 @@ function setTheme(dark) {
 addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const tool = TOOLS.find(t => t.key === e.key);
-  if (tool) S.tool = tool.id;
+  if (tool) S.tool = S.tool === tool.id ? null : tool.id;   // a tool is a toggle: same key puts it away
   else if (KEYS[e.key]) { e.preventDefault(); KEYS[e.key](); }
   else return;
   S.uiT = 1;
@@ -1254,26 +1339,32 @@ cv.addEventListener('pointermove', e => {
   }
   S.hover = tileAt(e.clientX, e.clientY);
   cv.classList.toggle('over', !d?.moved && snagentAt(e.clientX, e.clientY) >= 0);
+  cv.classList.toggle('armed', !!S.tool);
 });
 cv.addEventListener('pointerup', e => {
   const d = S.drag; S.drag = null; cv.classList.remove('grabbing');
   if (!d || d.moved) return;
   const k = snagentAt(e.clientX, e.clientY);
   if (k >= 0) select(k);
-  else { const i = tileAt(e.clientX, e.clientY); if (i >= 0) useTool(i); }
+  else if (S.tool) { const i = tileAt(e.clientX, e.clientY); if (i >= 0) useTool(i); }
   S.hover = tileAt(e.clientX, e.clientY); S.uiT = 1;
 });
 cv.addEventListener('pointercancel', () => { S.drag = null; cv.classList.remove('grabbing'); });
 cv.addEventListener('pointerleave', () => { if (!S.drag) S.hover = -1; });
 cv.addEventListener('wheel', e => { e.preventDefault(); S.goal = null; S.follow = false; S.camX += e.deltaX; S.camY += e.deltaY; clampCam(); }, { passive: false });
-$('#cast').addEventListener('pointerdown', e => { const b = e.target.closest('button'); if (b) { select(+b.dataset.i, true); S.uiT = 1; } });
+$('#cast').addEventListener('pointerdown', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.kids) { const k = b.dataset.kids; if (S.kids.has(k)) S.kids.delete(k); else S.kids.add(k); }
+  else select(+b.dataset.i, true);
+  S.uiT = 1;
+});
 $('#card').addEventListener('pointerdown', () => { S.cardOpen = !S.cardOpen; S.uiT = 1; });
 $('#menu').addEventListener('pointerdown', e => {
   const b = e.target.closest('button'); if (b) { KEYS[b.dataset.k](); S.uiT = 1; }
 });
 $('#tools').addEventListener('pointerdown', e => {
   const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.tool) S.tool = b.dataset.tool; else KEYS[b.dataset.k]();
+  if (b.dataset.tool) S.tool = S.tool === b.dataset.tool ? null : b.dataset.tool; else KEYS[b.dataset.k]();
   S.uiT = 1;
 });
 let resizeT = 0;

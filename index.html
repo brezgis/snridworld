@@ -53,6 +53,12 @@
   #cast button { text-align: left; padding: 2px 6px; white-space: pre; display: flex; gap: 2px; }
   #cast button i { width: 6.5em; }
   #cast button span { margin-left: auto; color: var(--soft); }
+  #cast .list { max-height: min(46vh, 330px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+  #cast button.kid { padding-left: 6px; font-size: 10.5px; }
+  #cast button.kid i:not(.tw) { width: 6.5em; }
+  #cast i.tw { width: auto !important; color: var(--soft); margin-right: 3px; }
+  #cast button.grp { color: var(--soft); font-size: 10.5px; padding: 1px 6px 2px; }
+  #cast button.grp b { margin-left: 2px; }
   #card { padding: 7px 10px 8px; line-height: 1.5; cursor: pointer; }
   #card .tg { float: right; color: var(--soft); font-weight: 400; }
   #card .ln { color: var(--soft); }
@@ -81,6 +87,12 @@
   #tools .sep { width: 1px; background: var(--line); margin: 3px 2px; }
   #tools pre { white-space: pre; }
   #tools .mb pre { color: var(--soft); }
+  #tools .th { position: absolute; bottom: calc(100% + 5px); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 9.5px; color: var(--soft); padding: 2px 8px; background: var(--paper); border: 1px solid var(--line); }
+  #tools .th b { color: var(--ink); }
+  #tools button.armed { background: rgba(var(--blue), .22); border-color: rgba(var(--blue), .7); box-shadow: inset 0 -2px 0 rgba(var(--blue), .8); }
+  #tools button.armed span { color: var(--ink); }
+  #scene.armed { cursor: copy; }
+  #scene.armed.over { cursor: pointer; }
   #menu {
     position: fixed; z-index: 8; display: none; flex-direction: column; align-items: stretch;
     padding: 4px; min-width: 210px; font-size: 11px;
@@ -113,6 +125,7 @@
       flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; font-size: 10px;
     }
     #tools button { padding: 2px 6px; white-space: nowrap; flex: none; }
+    #tools .th { display: none; }
     #tools button span { font-size: 8.5px; }
     #tools pre { font-size: 11px; }
   }
