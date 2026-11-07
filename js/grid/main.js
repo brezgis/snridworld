@@ -4,7 +4,7 @@
 import { World, T, TILE, W, WEATHER, WP, FOOD, STAGE, MOVE_NOTE, NB4, makeFood } from './world.js';
 import { Model, Planner, Learner, Wanderer, DIRS, TAG, GAMMA } from './brain.js';
 import { makeTextures, hsh } from './textures.js';
-import { THEME, C, ui as uiPal } from './theme.js';
+import { THEME, C, bright, ui as uiPal } from './theme.js';
 import { makeNoise, fbm, mulberry32, clamp, lerp, pick, rand, mirror, hex } from '../util.js';
 
 const TW = 7, TH = 3;                         // a tile is 7 x 3 characters
@@ -17,7 +17,9 @@ const S = {
   hover: -1, mx: -1, my: -1, lv: [0, 1, 0, 0],   // smoothed weather levels: sun cloud rain fog
   camX: 0, camY: 0, goal: null, drag: null, follow: false, menu: false,
 };
-let seed = (Math.random() * 2 ** 31) | 0;
+// ?seed=123 opens a particular garden (handy for sharing one, and for testing)
+const SEED_Q = +new URLSearchParams(location.search).get('seed');
+let seed = SEED_Q ? SEED_Q | 0 : (Math.random() * 2 ** 31) | 0;
 let world, model, tex, snagents = [], eggs = [], sel = 0;
 let charTile, charLX, charLY, charEdge, charEA, shownT, tileChars;
 let terrain, vp = {}, tiny = {};   // terrain: a screen-sized layer that scrolls with the camera
@@ -33,8 +35,8 @@ const TINT_L = [
   [140, 148, 160, .15], [218, 128, 46, .18], [140, 96, 60, .2], [100, 112, 130, .22], [162, 124, 218, .24], [0, 0, 0, 0],
 ];
 const TINT_D = [
-  [140, 104, 64, .12], [105, 80, 58, .16], [56, 150, 70, .2], [50, 195, 85, .27], [55, 125, 250, .3], [45, 105, 240, .42],
-  [130, 138, 152, .1], [195, 105, 40, .16], [140, 92, 56, .2], [110, 124, 145, .18], [160, 120, 230, .2], [0, 0, 0, 0],
+  [150, 120, 84, .05], [118, 98, 76, .12], [100, 150, 70, .15], [96, 172, 74, .22], [76, 134, 214, .24], [58, 110, 200, .34],
+  [150, 150, 150, .09], [200, 112, 46, .15], [150, 100, 60, .2], [150, 150, 145, .14], [160, 120, 220, .2], [0, 0, 0, 0],
 ];
 const SPEEDS = [.25, .5, 1, 2, 4, 8];
 const SWEEPS = 12;                // value-iteration sweeps per sim second
@@ -162,7 +164,7 @@ function init() {
   spawnSnagents();
   for (let k = 0; k < 40; k++) sweepAll();
   S.waterT = S.atmoT = S.overT = S.uiT = 1;
-  S.camX = (L.gw - L.W) / 2; S.camY = (L.gh - L.H) / 2; clampCam();
+  lookAt(snagents[sel].s, true);   // open on the selected snagent, wherever they started
   makeTerrain();
 }
 
@@ -202,18 +204,24 @@ const newBrain = k => k === 'plan' ? new Planner(world.n) : k === 'dyna' ? new L
 function spawnSnagents() {
   const keepSel = sel;
   snagents = [];
-  const taken = new Set();
-  const cx = world.cols / 2, cy = world.rows / 2;
+  // spread the cast over the garden: best-candidate sampling (each newcomer takes the farthest of a dozen
+  // random good spots), seeded so a given garden always starts the same way
+  const r = mulberry32(seed ^ 0x5a17), taken = [];
+  const good = i => world.pass(i) && world.type[i] !== T.LAVENDER && world.type[i] !== T.PUDDLE
+    && world.edge(i % world.cols + .5, (i / world.cols | 0) + .5) > .12;
+  const pool = [...Array(world.n).keys()].filter(good);
+  const comfy = pool.filter(i => world.type[i] === T.MOSS || world.type[i] === T.LUSH || world.type[i] === T.DAMP);
   for (const def of CAST) {
-    const ok = i => world.pass(i) && world.type[i] !== T.LAVENDER && !taken.has(i);
-    let s = -1;
-    // start everyone near the middle, so the first view has company
-    for (let k = 0; k < 600 && s < 0; k++) {
-      const i = world.idx(clamp(Math.round(cx + rand(-1, 1) * (3 + k / 40)), 0, world.cols - 1), clamp(Math.round(cy + rand(-1, 1) * (2 + k / 60)), 0, world.rows - 1));
-      if (ok(i) && (k > 300 || world.type[i] === T.MOSS || world.type[i] === T.LUSH)) s = i;
+    const from = comfy.length > 20 ? comfy : pool.length ? pool : [...Array(world.n).keys()].filter(i => world.pass(i));
+    let s = -1, best = -1;
+    for (let k = 0; k < 14; k++) {
+      const i = from[Math.floor(r() * from.length)];
+      if (taken.includes(i)) continue;
+      const d = taken.length ? Math.min(...taken.map(j => tdist(i, j))) : 0;
+      if (d > best) { best = d; s = i; }
     }
-    if (s < 0) s = [...Array(world.n).keys()].find(ok);
-    taken.add(s);
+    if (s < 0) s = from.find(i => !taken.includes(i));
+    taken.push(s);
     snagents.push(makeSnagent(def, s, newBrain(def.brain)));
   }
   sel = Math.min(keepSel, snagents.length - 1);
@@ -381,24 +389,24 @@ function drawAtmo() {
   const { GC, GR } = L, t = S.sim, [sun, cloud, rain, fog] = S.lv;
   const sh = tiny.shade, d = sh.img.data, dark = THEME.dark;
   const amt = cloud * .85 + rain * 1.15 + fog * .25;
-  const [sr, sg, sb] = dark ? [0, 0, 6] : [105, 108, 116];   // neutral grey, light touch: only water is blue
+  const [sr, sg, sb] = dark ? [10, 8, 6] : [105, 108, 116];   // neutral grey, light touch: only water is blue
   for (let gy = 0; gy < GR; gy++) for (let gx = 0; gx < GC; gx++) {
     const gi = gy * GC + gx, k = gi * 4;
     const m = fbm(NF1, gx / 34 + t * .045, gy / 13 + t * .012, 2);
-    const a = (clamp((m - .42) * 3, 0, 1) * amt * (dark ? .1 : .075) + rain * .035) * charEA[gi];
+    const a = (clamp((m - .42) * 3, 0, 1) * amt * (dark ? .085 : .075) + rain * .035) * charEA[gi];
     d[k] = sr; d[k + 1] = sg; d[k + 2] = sb; d[k + 3] = a * 255;
   }
   sh.ctx.putImageData(sh.img, 0, 0);
   const l = vp.atmo, c = l.ctx, { gx0, gx1, gy0, gy1 } = beginVP(l);
   const X = l.ox - L.M, Y = l.oy - L.M, w = L.W + 2 * L.M, h = L.H + 2 * L.M;
-  if (sun > .05 && !dark) { c.fillStyle = dark ? `rgba(255,200,120,${.03 * sun})` : `rgba(255,214,120,${.05 * sun})`; c.fillRect(X, Y, w, h); }
+  if (sun > .05) { c.fillStyle = dark ? `rgba(255,196,120,${.035 * sun})` : `rgba(255,214,120,${.05 * sun})`; c.fillRect(X, Y, w, h); }
   if (fog > .02) {
-    c.fillStyle = dark ? `rgba(8,9,11,${.38 * fog})` : `rgba(236,240,246,${.32 * fog})`; c.fillRect(X, Y, w, h);   // fog swallows the far glyphs
+    c.fillStyle = dark ? `rgba(120,116,108,${.2 * fog})` : `rgba(236,240,246,${.32 * fog})`; c.fillRect(X, Y, w, h);   // a soft pale veil
     for (let gy = gy0; gy < gy1; gy++) for (let gx = gx0; gx < gx1; gx++) {
       const m = NF2(gx / 14 - S.t * .3, gy / 3.6) * .6 + NF2(gx / 5 - S.t * .55 + 40, gy / 1.6) * .4;
       if (m < .58) continue;
       const a = clamp((m - .58) * 3, 0, 1) * fog * .55;
-      c.fillStyle = dark ? `rgba(160,160,150,${(a * .8).toFixed(3)})` : `rgba(140,155,178,${a.toFixed(3)})`;
+      c.fillStyle = dark ? `rgba(196,192,180,${(a * .8).toFixed(3)})` : `rgba(140,155,178,${a.toFixed(3)})`;
       c.fillText(m > .7 ? '~' : hsh(gx, gy, 4) < .5 ? '-' : '.', gx * L.CW, gy * L.CH);
     }
   }
@@ -429,7 +437,7 @@ function drawOverlay() {
     for (let s = 0; s < n; s++) { const k = s * 4; d[k] = pr; d[k + 1] = pg; d[k + 2] = pb; d[k + 3] = world.pass(s) ? 224 : world.inside(s) ? 70 : 0; }
     vl.ctx.putImageData(vl.img, 0, 0);
     c.save(); c.imageSmoothingEnabled = false; c.drawImage(vl.cv, 0, 0, L.gw, L.gh); c.restore();
-    const lowC = THEME.dark ? (rnd ? '#3a2a30' : '#2a3442') : (rnd ? '#e8d6da' : '#cfd9e6');
+    const lowC = THEME.dark ? (rnd ? '#45302e' : '#3b342b') : (rnd ? '#e8d6da' : '#cfd9e6');
     for (let s = 0; s < n; s++) {
       if (!world.pass(s) || !vis(s)) continue;
       const v = norm[s], tx = s % world.cols, ty = s / world.cols | 0, ch = VRAMP[Math.floor(clamp(v, 0, .999) * VRAMP.length)];
@@ -484,6 +492,10 @@ function decide(a) {
     const g = nearestKnown(a);
     if (g >= 0 && tdist(s, g) <= SMELL + 2) act = stepToward(s, g);
   }
+  if (act < 0 && a.brain === 'plan' && a.hunger > .75 && nearestKnown(a) < 0 && Math.random() < .35) {
+    act = Math.floor(Math.random() * 4);   // foraging: roam until a scent turns up
+    if (Math.random() < .15) setSay(a, pick(['so hungry', 'anything to eat?', 'foraging', 'sniff...']));
+  }
   if (act < 0) act = b.act(s);
   let [ns, tag] = model.sample(s, act);
   if (ns !== s && occupied(ns, a)) {
@@ -536,6 +548,9 @@ function arrive(a) {
 // a meal is finished: the eater might lay an egg, and anyone who was racing for it is disappointed
 function foodGone(i, f, eater) {
   for (const o of snagents) {
+    if (o.brainObj.mem && o.knows.has(f.id) && (o === eater || tdist(o.s, i) <= SMELL)) o.brainObj.forget(i, o.R[world.type[i]]);
+  }
+  for (const o of snagents) {
     if (o === eater || o.brain === 'random' || !o.knows.has(f.id) || o.state === 'sleep') continue;
     if (tdist(o.s, i) <= 4.5) setSay(o, pick(['aw', 'no fair', 'next time', 'hey!', 'i was coming']), true);
   }
@@ -566,7 +581,7 @@ function hatch(e) {
     blurb: `hatched from an egg. inherited a fuzzy copy of ${p.name}'s brain and tastes.`, baby: true, gen: p.gen + 1,
     Rarr: p.R.map((v, t) => t === T.LAVENDER || t === T.VOID ? v : v + rand(-.03, .03)), foodMul: +(p.foodMul * rand(.85, 1.15)).toFixed(2),
   }, e.s, b);
-  if (occupied(e.s, null)) {   // hatch onto a free square next door if the nest is busy
+  if (occupied(e.s, null) || world.type[e.s] === T.LAVENDER) {   // hatch onto a free square next door if the nest is busy (or smelly)
     const free = NB4.map(([dx, dy]) => world.nb(e.s, dx, dy)).find(j => world.pass(j) && world.type[j] !== T.LAVENDER && !occupied(j, null));
     if (free !== undefined) a.s = a.from = a.to = free;
   }
@@ -642,10 +657,10 @@ function snagentArt(a) {
   if (a.brain === 'random') {
     let lines = ['{:}' + (a.blink > 0 || asleep ? '.' : 'o')], mask = ['rkrk'];
     if (a.face < 0) [lines, mask] = flip(lines, mask);
-    return { lines, mask, colors: { r: a.shell, k: '#36404d' }, dx: 1, dy: 1 };
+    return { lines, mask, colors: { r: bright(a.shell), k: '#36404d' }, dx: 1, dy: 1 };
   }
   const S0 = a.spiral, onWater = world.type[a.s] === T.PUDDLE;
-  const colors = { s: a.shell, e: '#36404d', b: onWater ? '#5b84c4' : THEME.dark ? '#3c444e' : '#7d8a98' };
+  const colors = { s: bright(a.shell), e: '#36404d', b: onWater ? '#5b84c4' : THEME.dark ? '#3c444e' : '#7d8a98' };
   let lines, mask, dx = 0;
   if (a.age < GROW) {   // snaby: two characters wide
     const E = a.blink > 0 || asleep ? '.' : '"';
@@ -686,7 +701,7 @@ function drawPool(c, a) {
   c.save(); c.translate(x, y); c.scale(1, .62);
   const g = c.createRadialGradient(0, 0, 0, 0, 0, R);
   const [r, gg, b] = hex(a.shell);
-  if (THEME.dark) { g.addColorStop(0, `rgba(${r},${gg},${b},.14)`); g.addColorStop(.5, `rgba(${r},${gg},${b},.05)`); g.addColorStop(1, `rgba(${r},${gg},${b},0)`); }
+  if (THEME.dark) { g.addColorStop(0, `rgba(${r},${gg},${b},.24)`); g.addColorStop(.5, `rgba(${r},${gg},${b},.09)`); g.addColorStop(1, `rgba(${r},${gg},${b},0)`); }
   else { g.addColorStop(0, 'rgba(255,253,242,.82)'); g.addColorStop(.45, 'rgba(255,252,240,.4)'); g.addColorStop(1, 'rgba(255,252,240,0)'); }
   c.fillStyle = g; c.beginPath(); c.arc(0, 0, R, 0, Math.PI * 2); c.fill();
   c.restore();
@@ -695,11 +710,11 @@ function drawPool(c, a) {
 // every snagent sits in a small soft clearing: the texture under them calms down so they read at a glance
 function drawClearing(c, a) {
   const p = artPos(a), small = a.brain === 'random' || a.age < GROW;
-  const x = (p.col + 2.5) * L.CW, y = (p.row + (small ? 1.5 : 1)) * L.CH, R = (small ? 2.6 : 4) * L.CW;
+  const x = (p.col + 2.5) * L.CW, y = (p.row + (small ? 1.5 : 1)) * L.CH, R = (small ? 2.6 : 4) * L.CW * (THEME.dark ? 1.25 : 1);
   const [pr, pg, pb] = hex(uiPal().paper), [r, g, b] = hex(a.shell);
   c.save(); c.translate(x, y); c.scale(1, .55);
   const gr = c.createRadialGradient(0, 0, 0, 0, 0, R);
-  if (THEME.dark) { gr.addColorStop(0, `rgba(${r},${g},${b},.2)`); gr.addColorStop(.35, `rgba(${pr},${pg},${pb},.72)`); }
+  if (THEME.dark) { gr.addColorStop(0, `rgba(${r},${g},${b},.22)`); gr.addColorStop(.3, `rgba(${pr},${pg},${pb},.9)`); gr.addColorStop(.55, `rgba(${pr},${pg},${pb},.82)`); gr.addColorStop(.8, `rgba(${pr},${pg},${pb},.4)`); }
   else { gr.addColorStop(0, `rgba(${pr},${pg},${pb},.85)`); gr.addColorStop(.45, `rgba(${pr},${pg},${pb},.7)`); }
   gr.addColorStop(1, `rgba(${pr},${pg},${pb},0)`);
   c.fillStyle = gr; c.beginPath(); c.arc(0, 0, R, 0, Math.PI * 2); c.fill();
@@ -928,11 +943,11 @@ function render(dt) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = pal.table; ctx.fillRect(0, 0, cv.width, cv.height);
   worldT(ctx); ctx.font = L.FONT; ctx.textBaseline = 'top';
-  if (!THEME.dark) { ctx.save(); ctx.imageSmoothingEnabled = true; ctx.drawImage(tiny.paper.cv, 0, 0, L.gw, L.gh); ctx.restore(); }
+  ctx.save(); ctx.imageSmoothingEnabled = true; ctx.drawImage(tiny.paper.cv, 0, 0, L.gw, L.gh); ctx.restore();
   // slime first, so it tints under the terrain characters
   for (const [gi, t0] of trail) {
     const a = .13 * (1 - (S.sim - t0) / 40);
-    ctx.fillStyle = THEME.dark ? `rgba(150,175,200,${(a * .45).toFixed(3)})` : `rgba(110,170,240,${a.toFixed(3)})`;
+    ctx.fillStyle = THEME.dark ? `rgba(160,190,220,${(a * .7).toFixed(3)})` : `rgba(110,170,240,${a.toFixed(3)})`;
     ctx.fillRect((gi % L.GC) * L.CW, (gi / L.GC | 0) * L.CH, L.CW + .3, L.CH);
   }
   if (tintDirty && (S.tintT += dt) > .1) {
@@ -941,8 +956,8 @@ function render(dt) {
     tiny.tint.ctx.putImageData(tiny.tint.img, 0, 0); tintDirty = false;
     const b = tiny.tintB.ctx; b.clearRect(0, 0, L.GC, L.GR); b.filter = 'blur(1.6px)'; b.drawImage(tiny.tint.cv, 0, 0); b.filter = 'none';
   }
-  // on paper the terrains sit on soft colour washes; in the dark garden the glyphs alone carry the colour
-  if (!THEME.dark) { ctx.save(); ctx.imageSmoothingEnabled = true; ctx.drawImage(tiny.tintB.cv, 0, 0, L.gw, L.gh); ctx.restore(); }
+  // the terrains sit on soft translucent colour washes, so the map reads as patches of moss, soil and water
+  ctx.save(); ctx.imageSmoothingEnabled = true; ctx.drawImage(tiny.tintB.cv, 0, 0, L.gw, L.gh); ctx.restore();
   drawGrid(ctx);
   blitVP(terrain); worldT(ctx);
   blitVP(vp.water);
@@ -954,7 +969,7 @@ function render(dt) {
   // night falls over the ground; the snagents stay legible on top of it
   if (S.night > .01) {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = THEME.dark ? `rgba(0,2,10,${(.4 * S.night).toFixed(3)})` : `rgba(28,38,80,${(.3 * S.night).toFixed(3)})`;
+    ctx.fillStyle = THEME.dark ? `rgba(14,20,44,${(.34 * S.night).toFixed(3)})` : `rgba(28,38,80,${(.3 * S.night).toFixed(3)})`;
     ctx.fillRect(0, 0, cv.width, cv.height); worldT(ctx);
   }
   drawPool(ctx, snagents[sel]);
@@ -993,7 +1008,7 @@ function drawGrid(c) {
   const ty0 = Math.max(1, Math.floor(S.camY / th)), ty1 = Math.min(world.rows - 1, Math.ceil((S.camY + L.H) / th));
   const ins = (x, y) => world.inside(world.idx(x, y));
   const mx = S.mx >= 0 ? S.mx + S.camX : -1e9, my = S.my >= 0 ? S.my + S.camY : -1e9, RAD = 170;
-  const base = S.view ? .26 : THEME.dark ? .07 : .15;
+  const base = S.view ? .26 : THEME.dark ? .09 : .15;
   c.save(); c.lineWidth = 1; c.setLineDash([2, 3]);
   c.strokeStyle = `rgba(${gr},${gg},${gb},${base})`;
   c.beginPath();
@@ -1052,8 +1067,9 @@ function mood(a) {
   const g = nearestKnown(a);
   if (g >= 0) return `smells ${FOOD[world.food[g].kind].name}`;
   if (a.age < GROW) return 'a snaby';
-  if (a.hunger > .75) return 'hungry';
-  return pick(['pottering', 'wandering', 'content']);
+  if (a.hunger > .75) return a.brain === 'plan' ? 'hungry, foraging' : 'hungry';
+  // a calm word that changes every few seconds (not on every panel refresh)
+  return ['pottering', 'wandering', 'content'][(Math.floor(S.sim / 9) + a.name.length) % 3];
 }
 const clock = () => { const m = Math.floor(dayPhase() * 24 * 60); return `${String(m / 60 | 0).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
 

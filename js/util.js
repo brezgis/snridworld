@@ -37,6 +37,8 @@ export const fbm = (n, x, y, o = 4) => {
 export const hex = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 // the garden is authored for the dark: THEME.dark is the default, light is the old paper look
 export const THEME = { dark: true };
+// the dark garden's ground: warm dark earth, not black. faded glyphs sink into it
+export const GROUND = [38, 33, 28];
 // colours the dark palettes produce are already right for the dark ground; C() passes them through untouched
 export const AUTHORED = new Set();
 // a literal colour authored for the dark ground: registered so C() leaves it alone
@@ -57,7 +59,7 @@ export function palette(stops, dark) {
     if (!THEME.dark || !d) return at(s, t, fade, [255, 255, 255]);
     const key = Math.round(clamp(t, 0, 1) * 64) * 100 + Math.round(fade * 50);
     let v = memo.get(key);
-    if (!v) { v = at(d, Math.round(clamp(t, 0, 1) * 64) / 64, Math.round(fade * 50) / 50, [8, 9, 11]); memo.set(key, v); AUTHORED.add(v); }
+    if (!v) { v = at(d, Math.round(clamp(t, 0, 1) * 64) / 64, Math.round(fade * 50) / 50, GROUND); memo.set(key, v); AUTHORED.add(v); }
     return v;
   };
 }
@@ -65,21 +67,21 @@ export function palette(stops, dark) {
 // an autumn-forest palette: olive and pine mosses, ochre and rust litter, stone greys, nothing neon.
 export const PAL = {
   MOSS: palette([[0, '#1f3d26'], [.28, '#36692f'], [.55, '#5f9a37'], [.8, '#98c446'], [1, '#d3e683']],
-    [[0, '#e2da80'], [.25, '#b4bc5a'], [.5, '#82a244'], [.75, '#56763a'], [1, '#32472a']]),
+    [[0, '#e2da80'], [.25, '#b4bc5a'], [.5, '#82a244'], [.75, '#5d7c40'], [1, '#41583a']]),
   SOIL: palette([[0, '#4b3a2c'], [.5, '#7d6248'], [1, '#b59c7d']],
-    [[0, '#cfac7c'], [.45, '#9a7c58'], [.75, '#6c5944'], [1, '#463b30']]),
+    [[0, '#cfac7c'], [.45, '#9a7c58'], [.75, '#7d6a52'], [1, '#5a4c3d']]),
   BARK: palette([[0, '#3d2b1e'], [.35, '#5f4330'], [.7, '#8f6b4a'], [1, '#c9a77c']],
-    [[0, '#d0a06a'], [.35, '#a6784a'], [.7, '#6e5038'], [1, '#3a2e24']]),
+    [[0, '#d0a06a'], [.35, '#a6784a'], [.7, '#7a5a40'], [1, '#4e3e30']]),
   ROCK: palette([[0, '#4f5862'], [.4, '#7d8792'], [.75, '#adb6bf'], [1, '#dbe1e6']],
-    [[0, '#c9ccc8'], [.4, '#93968f'], [.75, '#5c605c'], [1, '#33363a']]),
+    [[0, '#c9ccc8'], [.4, '#93968f'], [.75, '#6c6f6a'], [1, '#4c4d4a']]),
   LEAF: palette([[0, '#5a3220'], [.35, '#8a4a25'], [.65, '#b46a35'], [1, '#d59a5c']],
-    [[0, '#e8b050'], [.35, '#c47a36'], [.65, '#8e4c2c'], [1, '#4a2a1e']]),
+    [[0, '#e8b050'], [.35, '#c47a36'], [.65, '#985634'], [1, '#5e3a28']]),
   WATER: palette([[0, '#1d4f8f'], [.4, '#3a78c9'], [.75, '#7fb0ec'], [1, '#cfe3fb']],
-    [[0, '#8cbcf0'], [.4, '#5288cc'], [.75, '#2e5690'], [1, '#18294a']]),
+    [[0, '#8cbcf0'], [.4, '#5288cc'], [.75, '#3a64a0'], [1, '#2a3e64']]),
   SAND: palette([[0, '#8c7650'], [.45, '#c2a878'], [.8, '#e3d2a8'], [1, '#f4ead2']],
-    [[0, '#e6d29c'], [.45, '#b49a68'], [.8, '#76664a'], [1, '#433b2e']]),
+    [[0, '#e6d29c'], [.45, '#b49a68'], [.8, '#867658'], [1, '#574c3c']]),
   GRASS: palette([[0, '#2d5a23'], [.4, '#4f8a33'], [.75, '#86b84a'], [1, '#c7df82']],
-    [[0, '#d8d27a'], [.4, '#9aaa50'], [.75, '#56763a'], [1, '#2a3d24']]),
+    [[0, '#d8d27a'], [.4, '#9aaa50'], [.75, '#5d7c40'], [1, '#3d5532']]),
 };
 
 // ascii mirroring for left-facing art

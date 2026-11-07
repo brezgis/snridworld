@@ -1,6 +1,6 @@
 # snridworld
 
-`_(@)"` a markov garden, drawn entirely in ascii, glyph by glyph on a dark ground.
+`_(@)"` a markov garden, drawn entirely in ascii, glyph by glyph on warm dark earth, over soft washes of colour.
 
 **play it at [snail.brezgis.com](https://snail.brezgis.com)**
 
@@ -41,7 +41,7 @@ Learners show `?` where they have never been.
 
 **Life in the garden.** Ripe food gives off scent that drifts about five squares; snagents who smell it
 say "smell that?" and head over, and when two of them race for the same cucumber the winner says "mine!"
-and the other says "aw". Days and nights cycle: at night snagents curl up and sleep, and fireflies come out.
+and the other says "aw". A hungry planner that knows of no food goes foraging, roaming until it catches a scent. Days and nights cycle: at night snagents curl up and sleep, and fireflies come out.
 
 ![night in the dark garden](screenshots/night.png)
 
@@ -64,6 +64,7 @@ snagent's card has a little ascii learning curve, so you can watch the learners 
 | `space` / `-` `+` | pause / speed |
 | `n` | a new garden |
 | `d` | the old paper look, or back to the dark garden |
+| `?seed=123` in the url | open a particular garden (the same seed always grows the same garden) |
 
 ## running it
 

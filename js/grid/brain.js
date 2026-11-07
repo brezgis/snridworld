@@ -116,6 +116,10 @@ export class Learner {
     }
     return before;
   }
+  // a meal at tile i is gone: remembered moves that ended there now remember just the empty tile
+  forget(i, r) {
+    for (const [k, m] of this.mem) if (m[1] === i && m[2]) this.mem.set(k, [r, i, false]);
+  }
   value(s) { return this.maxQ(s); }
   greedy(s) { return argmax(this.Q, s, () => .5); }
 }

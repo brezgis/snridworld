@@ -5,7 +5,7 @@ export { THEME };
 export const PAL_UI = {
   // paper is the garden's ground; table is what the garden sits on, so the island has a frame
   light: { paper: '#f4efe3', table: '#dcd7ca', halo: 'rgba(244,239,227,.95)', ink: '#2b3442', grid: [70, 110, 160] },
-  dark: { paper: '#08090b', table: '#08090b', halo: 'rgba(8,9,11,.92)', ink: '#e6dfd2', grid: [150, 135, 110] },
+  dark: { paper: '#26211c', table: '#211d19', halo: 'rgba(38,33,28,.92)', ink: '#ece4d4', grid: [170, 150, 118] },
 };
 export const ui = () => THEME.dark ? PAL_UI.dark : PAL_UI.light;
 
@@ -56,3 +56,16 @@ export const C = c => {
   if (v === undefined) { v = THEME.dark ? night(c) : day(c); m.set(c, v); }
   return v;
 };
+// the snagents' own colours in the dark: lifted and a touch richer, so a shell always pops out of the moss
+const brightMemo = new Map();
+export function bright(c) {
+  if (!THEME.dark) return c;
+  let v = brightMemo.get(c);
+  if (!v) {
+    const [r, g, b, a] = parse(c);
+    const [h, s, l] = toHsl(r / 255, g / 255, b / 255);
+    const [R, G, B] = fromHsl(h, Math.min(1, s * 1.1 + .05), clamp(Math.max(l, .66), 0, .86));
+    v = `rgba(${R},${G},${B},${a})`; brightMemo.set(c, v); AUTHORED.add(v);
+  }
+  return v;
+}

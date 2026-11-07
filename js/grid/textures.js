@@ -39,14 +39,14 @@ export function makeTextures(seed) {
         if (Math.abs(N2(gx / 7, gy / 2.6) - .5) < .016) g = [R(['_', '/', '\\', '-', ','], h), SOIL(.45 + n * .2)];   // drying cracks
         else if (h < .012) g = ['o', ROCK(.62)];
         else if (THEME.dark && hsh(gx, gy, 7) < .06 + .1 * n) g = [R(WEEDS, h2), R(WEED_D, hsh(gx, gy, 8))];   // weeds
-        else if (h > .4 + .12 * n) g = THEME.dark && h > .5 ? [R(['.', '-', '_', '.', '`', ',', '~', '='], h2), SOIL(clamp(.82 + .16 * n, 0, 1))] : [' ', null];   // quiet ground: paper, or dim grain on black
+        else if (h > .4 + .12 * n) g = THEME.dark && h > .5 ? [R(['.', '-', '_', '.', '`', ',', '~', '='], h2), SOIL(clamp(.7 + .2 * n, 0, 1))] : [' ', null];   // quiet ground: paper, or dim grain on black
         else g = [R(['.', '.', ',', "'", '`', '.', '.', '-'], h2), SOIL(clamp(.6 + .3 * n + (h - .5) * .2, 0, .95))];
         break;
       }
       case T.DAMP: {
         const n = fbm(N1, gx / 9, gy / 4, 2);
         if (h < .035) g = [flick(o.now, h, .8, 6) ? '*' : "'", THEME.dark ? PAL.WATER(.55) : 'rgba(70,140,230,.85)'];          // dew
-        else if (h > .66) g = THEME.dark ? [R(['.', ',', ':', '`'], h2), SOIL(.86)] : [' ', null];
+        else if (h > .66) g = THEME.dark ? [R(['.', ',', ':', '`'], h2), SOIL(.76)] : [' ', null];
         else g = [R([':', ';', ',', '.', ':', '.', ';'], h2), SOIL(clamp(.3 + .35 * n + (h - .5) * .2, 0, 1))];
         break;
       }
