@@ -892,9 +892,11 @@ function maybeGust(force = false) {
   }
   // leaves skittering downwind across what you can see
   const gx0 = S.camX / L.CW, gy0 = S.camY / L.CH, w = L.W / L.CW, h = L.H / L.CH;
-  for (let k = 0; k < 56; k++) {
+  // scaled to the screen, in a couple of waves, so a gust reads as weather on any size of window
+  const nLeaves = Math.round(Math.min(320, Math.max(70, w * h / 16)));
+  for (let k = 0; k < nLeaves; k++) {
     const pair = pick([['~', '-'], ['/', '\\'], ["'", ','], ['%', '&']]);
-    parts.push({ t: 'skitter', x: gx0 + rand(-10, w), y: gy0 + rand(0, h), vx: dir * rand(16, 30), life: rand(.7, 1.3), age: -rand(0, .35),
+    parts.push({ t: 'skitter', x: gx0 + rand(-14, w), y: gy0 + rand(0, h), vx: dir * rand(18, 42), life: rand(.9, 1.9), age: -rand(0, 1.4),
       ch: pair[0], ch2: pair[1], ph: rand(0, 9), col: pick(['#c47a36', '#b4bc5a', '#8e4c2c', '#d0a06a', '#82a244']) });
   }
   for (const a of snagents) if (a.brain !== 'random' && a.state !== 'sleep' && Math.random() < .5) setSay(a, pick(['whoa, wind!', 'windy', 'something fell', 'what was that']), true);
