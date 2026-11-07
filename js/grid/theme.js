@@ -1,12 +1,11 @@
 // light and night. every colour is authored for paper; C() re-lights it for the dark garden:
 // strong (dark) ink becomes strong (light) ink, hue kept, greens and blues glowing a little.
-import { clamp } from '../util.js';
-
-export const THEME = { dark: false };
+import { clamp, THEME, AUTHORED } from '../util.js';
+export { THEME };
 export const PAL_UI = {
   // paper is the garden's ground; table is what the garden sits on, so the island has a frame
   light: { paper: '#f4efe3', table: '#dcd7ca', halo: 'rgba(244,239,227,.95)', ink: '#2b3442', grid: [70, 110, 160] },
-  dark: { paper: '#0e141c', table: '#080b10', halo: 'rgba(14,20,28,.95)', ink: '#dfe6ef', grid: [120, 160, 220] },
+  dark: { paper: '#08090b', table: '#08090b', halo: 'rgba(8,9,11,.92)', ink: '#e6dfd2', grid: [150, 135, 110] },
 };
 export const ui = () => THEME.dark ? PAL_UI.dark : PAL_UI.light;
 
@@ -39,20 +38,19 @@ function day(c) {
   const [R, G, B] = fromHsl(h, Math.min(1, s * 1.32 + .04), l > .35 ? l * .9 : l);
   return `rgba(${R},${G},${B},${a})`;
 }
+// literal colours (shells, flowers, accents) authored for paper: strong ink becomes a bright glyph,
+// hue kept, a touch muted so nothing goes neon on black
 function night(c) {
   const [r, g, b, a] = parse(c);
   let [h, s, l] = toHsl(r / 255, g / 255, b / 255);
-  s = Math.min(1, s * 1.18);
-  let l2 = .16 + (1 - l) * .72;
-  if (h > .2 && h < .45 && s > .15) { l2 += .06; s = Math.min(1, s * 1.25); }   // moss glows
-  if (h > .55 && h < .7 && s > .2) { l2 += .07; s = Math.min(1, s * 1.15); }    // water brightens
-  if (h < .14 && s > .12 && s < .6) l2 -= .06;                                  // soil and bark stay quiet
-  const [R, G, B] = fromHsl(h, s, clamp(l2, 0, .94));
+  s = Math.min(1, s * .95);
+  const [R, G, B] = fromHsl(h, s, clamp(.2 + (1 - l) * .66, 0, .9));
   return `rgba(${R},${G},${B},${a})`;
 }
 const memo = [new Map(), new Map()];
 export const C = c => {
   if (!c) return c;
+  if (THEME.dark && AUTHORED.has(c)) return c;
   const m = memo[THEME.dark ? 1 : 0];
   let v = m.get(c);
   if (v === undefined) { v = THEME.dark ? night(c) : day(c); m.set(c, v); }

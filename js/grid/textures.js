@@ -1,10 +1,15 @@
 // how each tile type looks, one character at a time. noise runs in global char coords so
 // neighbouring tiles of the same kind knit together instead of reading as stamped squares.
-import { makeNoise, fbm, mulberry32, clamp, PAL } from '../util.js';
+import { makeNoise, fbm, mulberry32, clamp, PAL, THEME, ink } from '../util.js';
 import { T } from './world.js';
 
 const { MOSS, SOIL, BARK, ROCK, LEAF, SAND } = PAL;
 const MOSS_RAMP = '.,:;*%&#@', LEAF_RAMP = '.:-=+*%#', ROCK_RAMP = '.:-=+*#%@';
+// dry weeds and seed heads that scatter over bare ground in the dark garden, in autumn colours
+const WEEDS = ['v', 'y', 'Y', 'w', '"', 'v', 'r', 'f'], WEED_C = ['#b58a3a', '#9a6a34', '#a8584a', '#8e7a52', '#b0745a', '#7f8a4a'];
+// on black, a moss bed is never one green: mustard, pine, a little rust and dried straw creep in
+const MOSS_D = ['#a39a3c', '#c2a746', '#3f6a4a', '#5a7f3a', '#8e5a36', '#9c8a5a'].map(ink);
+const WEED_D = WEED_C.map(ink);
 const R = (a, h) => a[Math.floor(h * a.length) % a.length];
 
 export const hsh = (x, y, k = 0) => {
@@ -33,14 +38,15 @@ export function makeTextures(seed) {
         const n = fbm(N1, gx / 11, gy / 4.5, 2);
         if (Math.abs(N2(gx / 7, gy / 2.6) - .5) < .016) g = [R(['_', '/', '\\', '-', ','], h), SOIL(.45 + n * .2)];   // drying cracks
         else if (h < .012) g = ['o', ROCK(.62)];
-        else if (h > .4 + .12 * n) g = [' ', null];                                                  // quiet ground: mostly paper
+        else if (THEME.dark && hsh(gx, gy, 7) < .06 + .1 * n) g = [R(WEEDS, h2), R(WEED_D, hsh(gx, gy, 8))];   // weeds
+        else if (h > .4 + .12 * n) g = THEME.dark && h > .5 ? [R(['.', '-', '_', '.', '`', ',', '~', '='], h2), SOIL(clamp(.82 + .16 * n, 0, 1))] : [' ', null];   // quiet ground: paper, or dim grain on black
         else g = [R(['.', '.', ',', "'", '`', '.', '.', '-'], h2), SOIL(clamp(.6 + .3 * n + (h - .5) * .2, 0, .95))];
         break;
       }
       case T.DAMP: {
         const n = fbm(N1, gx / 9, gy / 4, 2);
-        if (h < .035) g = [flick(o.now, h, .8, 6) ? '*' : "'", 'rgba(70,140,230,.85)'];          // dew
-        else if (h > .66) g = [' ', null];
+        if (h < .035) g = [flick(o.now, h, .8, 6) ? '*' : "'", THEME.dark ? PAL.WATER(.55) : 'rgba(70,140,230,.85)'];          // dew
+        else if (h > .66) g = THEME.dark ? [R(['.', ',', ':', '`'], h2), SOIL(.86)] : [' ', null];
         else g = [R([':', ';', ',', '.', ':', '.', ';'], h2), SOIL(clamp(.3 + .35 * n + (h - .5) * .2, 0, 1))];
         break;
       }
@@ -49,6 +55,12 @@ export function makeTextures(seed) {
         if (lush && h2 < .035) { g = [R(['!', 'i', '|', '!'], h), h < .5 ? '#a0703a' : '#8a5a34']; break; }   // sporophytes
         if (h2 < (lush ? .16 : .1)) { g = [flick(o.now, h, .6) ? "'" : (lush ? '"' : ','), MOSS(lush ? .8 : .88)]; break; }   // tufts
         const tone = lush ? clamp(.32 + .6 * (1 - L) + (h - .5) * .16, 0, .999) : clamp(.05 + .6 * (1 - L) + (h - .5) * .16, 0, .999);
+        if (THEME.dark) {   // lighter glyphs overall, so the bright clumps stand out of a dim bed
+          const h3 = hsh(gx, gy, 9);
+          const col = h3 < (lush ? .1 : .16) ? R(MOSS_D, hsh(gx, gy, 10)) : MOSS(clamp((lush ? .12 : .4) + .5 * L + (h2 - .5) * .34, 0, 1));
+          g = [MOSS_RAMP[Math.floor(tone * (lush ? .9 : .7) * MOSS_RAMP.length)], col];
+          break;
+        }
         g = [MOSS_RAMP[Math.floor(tone * MOSS_RAMP.length)], MOSS(clamp((lush ? .1 : .35) + .42 * L + (h2 - .5) * .2, 0, 1), lush ? 0 : .04)];
         break;
       }
@@ -84,7 +96,9 @@ export function makeTextures(seed) {
         if (d > 1.15) { g = [R(['.', ':', ',', "'"], h), ROCK(.5 + .3 * h2)]; break; }   // grit around the boulder
         if (v < -.3 && N3(gx / 4, gy / 2) > .52) { g = [R(MOSS_RAMP.slice(2), h), MOSS(.3 + .4 * h2)]; break; }
         const light = clamp(-.45 * u - .55 * v + .45 * Math.sqrt(Math.max(0, 1 - d * .8)) + (h - .5) * .25 + .2, 0, 1);
-        g = [ROCK_RAMP[Math.floor((1 - light) * .999 * 9)], ROCK(light * .85 + .05)];
+        // on paper the lit face is pale and sparse; on black it is the bright, dense side
+        g = THEME.dark ? [ROCK_RAMP[Math.floor(clamp(light * .95 + .05, 0, .999) * 9)], ROCK(1 - light * .9)]
+          : [ROCK_RAMP[Math.floor((1 - light) * .999 * 9)], ROCK(light * .85 + .05)];
         break;
       }
       case T.LAVENDER: {   // snails steer clear of strong-smelling herbs
@@ -106,6 +120,7 @@ export function makeTextures(seed) {
     // land touching water gets a damp margin, so shores read as wet
     if (o.shore) {
       g[2] = 'rgba(90,155,240,.08)';
+      if (THEME.dark) { if ((type === T.SOIL || type === T.DAMP) && h < .7) g = [R([':', '.', ',', ';', "'"], h2), PAL.WATER(.62)]; return g; }
       if ((type === T.SOIL || type === T.DAMP) && h < .7) g = [R([':', '.', ',', ';', "'"], h2), 'rgba(70,115,165,.75)', g[2]];
     }
     return g;

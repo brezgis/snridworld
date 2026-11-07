@@ -385,20 +385,20 @@ function drawAtmo() {
   for (let gy = 0; gy < GR; gy++) for (let gx = 0; gx < GC; gx++) {
     const gi = gy * GC + gx, k = gi * 4;
     const m = fbm(NF1, gx / 34 + t * .045, gy / 13 + t * .012, 2);
-    const a = (clamp((m - .42) * 3, 0, 1) * amt * (dark ? .17 : .075) + rain * .035) * charEA[gi];
+    const a = (clamp((m - .42) * 3, 0, 1) * amt * (dark ? .1 : .075) + rain * .035) * charEA[gi];
     d[k] = sr; d[k + 1] = sg; d[k + 2] = sb; d[k + 3] = a * 255;
   }
   sh.ctx.putImageData(sh.img, 0, 0);
   const l = vp.atmo, c = l.ctx, { gx0, gx1, gy0, gy1 } = beginVP(l);
   const X = l.ox - L.M, Y = l.oy - L.M, w = L.W + 2 * L.M, h = L.H + 2 * L.M;
-  if (sun > .05) { c.fillStyle = dark ? `rgba(255,200,120,${.03 * sun})` : `rgba(255,214,120,${.05 * sun})`; c.fillRect(X, Y, w, h); }
+  if (sun > .05 && !dark) { c.fillStyle = dark ? `rgba(255,200,120,${.03 * sun})` : `rgba(255,214,120,${.05 * sun})`; c.fillRect(X, Y, w, h); }
   if (fog > .02) {
-    c.fillStyle = dark ? `rgba(70,82,100,${.22 * fog})` : `rgba(236,240,246,${.32 * fog})`; c.fillRect(X, Y, w, h);
+    c.fillStyle = dark ? `rgba(8,9,11,${.38 * fog})` : `rgba(236,240,246,${.32 * fog})`; c.fillRect(X, Y, w, h);   // fog swallows the far glyphs
     for (let gy = gy0; gy < gy1; gy++) for (let gx = gx0; gx < gx1; gx++) {
       const m = NF2(gx / 14 - S.t * .3, gy / 3.6) * .6 + NF2(gx / 5 - S.t * .55 + 40, gy / 1.6) * .4;
       if (m < .58) continue;
       const a = clamp((m - .58) * 3, 0, 1) * fog * .55;
-      c.fillStyle = dark ? `rgba(150,165,190,${a.toFixed(3)})` : `rgba(140,155,178,${a.toFixed(3)})`;
+      c.fillStyle = dark ? `rgba(160,160,150,${(a * .8).toFixed(3)})` : `rgba(140,155,178,${a.toFixed(3)})`;
       c.fillText(m > .7 ? '~' : hsh(gx, gy, 4) < .5 ? '-' : '.', gx * L.CW, gy * L.CH);
     }
   }
@@ -645,7 +645,7 @@ function snagentArt(a) {
     return { lines, mask, colors: { r: a.shell, k: '#36404d' }, dx: 1, dy: 1 };
   }
   const S0 = a.spiral, onWater = world.type[a.s] === T.PUDDLE;
-  const colors = { s: a.shell, e: '#36404d', b: onWater ? '#5b84c4' : '#7d8a98' };
+  const colors = { s: a.shell, e: '#36404d', b: onWater ? '#5b84c4' : THEME.dark ? '#3c444e' : '#7d8a98' };
   let lines, mask, dx = 0;
   if (a.age < GROW) {   // snaby: two characters wide
     const E = a.blink > 0 || asleep ? '.' : '"';
@@ -686,7 +686,7 @@ function drawPool(c, a) {
   c.save(); c.translate(x, y); c.scale(1, .62);
   const g = c.createRadialGradient(0, 0, 0, 0, 0, R);
   const [r, gg, b] = hex(a.shell);
-  if (THEME.dark) { g.addColorStop(0, `rgba(${r},${gg},${b},.26)`); g.addColorStop(.5, `rgba(${r},${gg},${b},.1)`); g.addColorStop(1, `rgba(${r},${gg},${b},0)`); }
+  if (THEME.dark) { g.addColorStop(0, `rgba(${r},${gg},${b},.14)`); g.addColorStop(.5, `rgba(${r},${gg},${b},.05)`); g.addColorStop(1, `rgba(${r},${gg},${b},0)`); }
   else { g.addColorStop(0, 'rgba(255,253,242,.82)'); g.addColorStop(.45, 'rgba(255,252,240,.4)'); g.addColorStop(1, 'rgba(255,252,240,0)'); }
   c.fillStyle = g; c.beginPath(); c.arc(0, 0, R, 0, Math.PI * 2); c.fill();
   c.restore();
@@ -928,11 +928,11 @@ function render(dt) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = pal.table; ctx.fillRect(0, 0, cv.width, cv.height);
   worldT(ctx); ctx.font = L.FONT; ctx.textBaseline = 'top';
-  ctx.save(); ctx.imageSmoothingEnabled = true; ctx.drawImage(tiny.paper.cv, 0, 0, L.gw, L.gh); ctx.restore();
+  if (!THEME.dark) { ctx.save(); ctx.imageSmoothingEnabled = true; ctx.drawImage(tiny.paper.cv, 0, 0, L.gw, L.gh); ctx.restore(); }
   // slime first, so it tints under the terrain characters
   for (const [gi, t0] of trail) {
     const a = .13 * (1 - (S.sim - t0) / 40);
-    ctx.fillStyle = THEME.dark ? `rgba(110,170,240,${(a * .8).toFixed(3)})` : `rgba(110,170,240,${a.toFixed(3)})`;
+    ctx.fillStyle = THEME.dark ? `rgba(150,175,200,${(a * .45).toFixed(3)})` : `rgba(110,170,240,${a.toFixed(3)})`;
     ctx.fillRect((gi % L.GC) * L.CW, (gi / L.GC | 0) * L.CH, L.CW + .3, L.CH);
   }
   if (tintDirty && (S.tintT += dt) > .1) {
@@ -941,7 +941,8 @@ function render(dt) {
     tiny.tint.ctx.putImageData(tiny.tint.img, 0, 0); tintDirty = false;
     const b = tiny.tintB.ctx; b.clearRect(0, 0, L.GC, L.GR); b.filter = 'blur(1.6px)'; b.drawImage(tiny.tint.cv, 0, 0); b.filter = 'none';
   }
-  ctx.save(); ctx.imageSmoothingEnabled = true; ctx.drawImage(tiny.tintB.cv, 0, 0, L.gw, L.gh); ctx.restore();
+  // on paper the terrains sit on soft colour washes; in the dark garden the glyphs alone carry the colour
+  if (!THEME.dark) { ctx.save(); ctx.imageSmoothingEnabled = true; ctx.drawImage(tiny.tintB.cv, 0, 0, L.gw, L.gh); ctx.restore(); }
   drawGrid(ctx);
   blitVP(terrain); worldT(ctx);
   blitVP(vp.water);
@@ -992,7 +993,7 @@ function drawGrid(c) {
   const ty0 = Math.max(1, Math.floor(S.camY / th)), ty1 = Math.min(world.rows - 1, Math.ceil((S.camY + L.H) / th));
   const ins = (x, y) => world.inside(world.idx(x, y));
   const mx = S.mx >= 0 ? S.mx + S.camX : -1e9, my = S.my >= 0 ? S.my + S.camY : -1e9, RAD = 170;
-  const base = S.view ? .26 : .15;
+  const base = S.view ? .26 : THEME.dark ? .07 : .15;
   c.save(); c.lineWidth = 1; c.setLineDash([2, 3]);
   c.strokeStyle = `rgba(${gr},${gg},${gb},${base})`;
   c.beginPath();
@@ -1270,7 +1271,7 @@ addEventListener('resize', () => {
   }, 250);
 });
 
-setTheme(matchMedia('(prefers-color-scheme: dark)').matches);
+setTheme(true);   // the garden is made for the dark; d switches to the old paper look
 document.fonts.load(`12px 'JetBrains Mono'`).finally(() => {
   init();
   if (S.test) window.SR = { S, get world() { return world; }, get snagents() { return snagents; }, get eggs() { return eggs; }, step: dt => { update(dt); }, render: () => { render(1); ui(); }, frame: dt => render(dt), KEYS, lookAt };

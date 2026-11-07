@@ -1,6 +1,6 @@
 # snridworld
 
-`_(@)"` a markov garden, drawn entirely in ascii.
+`_(@)"` a markov garden, drawn entirely in ascii, glyph by glyph on a dark ground.
 
 **play it at [snail.brezgis.com](https://snail.brezgis.com)**
 
@@ -63,7 +63,7 @@ snagent's card has a little ascii learning curve, so you can watch the learners 
 | `w` | force a weather roll |
 | `space` / `-` `+` | pause / speed |
 | `n` | a new garden |
-| `d` | light or dark |
+| `d` | the old paper look, or back to the dark garden |
 
 ## running it
 
@@ -82,7 +82,7 @@ js/util.js          noise, palettes, small helpers
 js/grid/world.js    the tile, weather and food chains; the island's shape
 js/grid/brain.js    the crawling model (P), value iteration, Q-learning / Dyna-Q, the random walk
 js/grid/textures.js how each terrain looks, one character at a time
-js/grid/theme.js    light and dark palettes
+js/grid/theme.js    the dark garden (default) and the paper look
 js/grid/main.js     rendering, snagents, smell, snabies, day and night, input
 ```
 
