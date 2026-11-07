@@ -3,7 +3,7 @@
 // P(next type | type, weather, neighbours).
 import { makeNoise, fbm, mulberry32, clamp } from '../util.js';
 
-export const T = { SOIL: 0, DAMP: 1, MOSS: 2, LUSH: 3, PUDDLE: 4, POND: 5, PEBBLE: 6, LEAF: 7, LOG: 8, ROCK: 9, LAVENDER: 10, VOID: 11 };
+export const T = { SOIL: 0, DAMP: 1, MOSS: 2, LUSH: 3, PUDDLE: 4, POND: 5, PEBBLE: 6, LEAF: 7, LOG: 8, ROCK: 9, LAVENDER: 10, VOID: 11, BUSH: 12 };
 export const TILE = [
   { key: 'soil', name: 'dry soil', icon: ".,'", pass: true },
   { key: 'damp', name: 'damp soil', icon: ':;,', pass: true },
@@ -17,6 +17,7 @@ export const TILE = [
   { key: 'rock', name: 'boulder', icon: '#%@', pass: false, fixed: true },
   { key: 'lavender', name: 'lavender', icon: '*|*', pass: true, fixed: true },
   { key: 'void', name: 'the edge of the garden', icon: '   ', pass: false, fixed: true },
+  { key: 'bush', name: 'wild berry bush', icon: '%o%', pass: false, fixed: true },
 ];
 // what it is like to crawl off a tile: the per-terrain transition noise the snagents have to live with
 export const MOVE_NOTE = {
@@ -45,6 +46,9 @@ export const FOOD = {
   mushroom: { name: 'mushroom', v: 1.2 },
   cucumber: { name: 'cucumber', v: 2.4 },
   berry: { name: 'strawberry', v: 1.8 },
+  // windfall: blown in from trees just off the map when a storm comes up
+  apple: { name: 'apple', v: 2.1 },
+  cherry: { name: 'cherries', v: 1.6 },
 };
 export const STAGE = ['fresh', 'overripe'];
 
@@ -55,7 +59,7 @@ export class World {
     const n = this.n;
     this.type = new Uint8Array(n); this.prev = new Uint8Array(n); this.fade = new Float32Array(n).fill(1);
     this.elev = new Float32Array(n); this.food = new Array(n).fill(null);
-    this.weather = W.CLOUD; this.history = [W.CLOUD]; this.lastRoll = null;
+    this.weather = W.CLOUD; this.history = [W.CLOUD]; this.gusts = [false]; this.lastRoll = null;
     this.tick = 0; this.bush = -1; this.events = [];
     this.gen();
   }
@@ -138,6 +142,25 @@ export class World {
       const spill = [[1, 0], [2, 0], [1, 1], [-1, 0], [0, 1], [2, 1]].filter(() => r() < .6);
       for (const [dx, dy] of spill) { const j = this.nb(i, dx, dy); if (land(j)) this.type[j] = T.LAVENDER; }
     }
+    // wild berry bushes: one to three, inland, with room around them for berries to fall
+    this.bushes = [];
+    const want = clamp(Math.round(n / 900), 1, 3);
+    for (let k = 0; k < 600 && this.bushes.length < want; k++) {
+      const i = Math.floor(r() * n), x = i % cols, y = i / cols | 0;
+      if (!land(i) || this.edge(x + .5, y + .5) < .3) continue;
+      let room = 0, near = false;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const j = this.nb(i, dx, dy);
+        if (j < 0) continue;
+        if (Math.abs(dx) + Math.abs(dy) === 1 && land(j)) room++;
+        if (this.type[j] === T.LAVENDER || this.type[j] === T.BUSH) near = true;
+      }
+      if (room < 3 || near) continue;
+      this.type[i] = T.BUSH;
+      // six berry slots, each somewhere between a hard green bud (0) and ripe red (1)
+      this.bushes.push({ i, ber: Array.from({ length: 6 }, () => r() * 1.1), drops: 0 });
+    }
+    this.bushAt = new Map(this.bushes.map(b => [b.i, b]));
     // a few mushrooms to start
     for (let i = 0; i < n; i++) if (this.type[i] === T.LUSH && r() < .07) this.food[i] = makeFood('mushroom', r, 1);
   }
@@ -246,17 +269,49 @@ export class World {
     return changed;
   }
 
+  // berries ripen a little every tick (faster when it is wet); now and then a ripe one drops onto a free
+  // neighbouring square as an ordinary strawberry. wildFood caps how much windfall can lie about at once
+  stepBushes(wildCap) {
+    const r = this.rng, wet = this.weather === W.RAIN ? 2.6 : this.weather === W.FOG ? 1.6 : this.weather === W.SUN ? .7 : 1;
+    let wild = 0;
+    for (const f of this.food) if (f && f.wild) wild++;
+    for (const b of this.bushes) {
+      for (let k = 0; k < b.ber.length; k++) if (b.ber[k] < 1) b.ber[k] = Math.min(1, b.ber[k] + .006 * wet * (.6 + r() * .8));
+      const ripe = b.ber.map((v, k) => [v, k]).filter(([v]) => v >= 1);
+      if (!ripe.length || wild >= wildCap || r() > .035 * ripe.length) continue;
+      const spots = [];
+      for (const [dx, dy] of NB8) {
+        const j = this.nb(b.i, dx, dy);
+        if (j >= 0 && this.pass(j) && !this.food[j] && this.type[j] !== T.LAVENDER && this.type[j] !== T.PUDDLE) spots.push(j);
+      }
+      if (!spots.length) continue;
+      const j = spots[Math.floor(r() * spots.length)], k = ripe[Math.floor(r() * ripe.length)][1];
+      b.ber[k] = 0; b.drops++; wild++;
+      const f = makeFood('berry', r, 1); f.wild = true; this.food[j] = f;
+      this.events.push({ t: 'drop', i: j, from: b.i, f });
+    }
+  }
+  bushInfo(i) {
+    const b = this.bushAt.get(i);
+    if (!b) return null;
+    const ripe = b.ber.filter(v => v >= 1).length, green = b.ber.filter(v => v < .5).length;
+    const wet = this.weather === W.RAIN ? 2.6 : this.weather === W.FOG ? 1.6 : this.weather === W.SUN ? .7 : 1;
+    return { ripe, ripening: b.ber.length - ripe - green, green, drop: ripe ? 1 - (1 - .035 * ripe) : 0, wet, drops: b.drops };
+  }
+
   stepWeather() {
     const from = this.weather, row = WP[from];
     let u = this.rng(), to = from;
     for (let k = 0; k < 4; k++) { if ((u -= row[k]) < 0) { to = k; break; } }
     this.weather = to; this.lastRoll = { from, to, p: row[to] };
-    this.history.push(to); if (this.history.length > 18) this.history.shift();
+    this.history.push(to); this.gusts.push(false);
+    if (this.history.length > 18) { this.history.shift(); this.gusts.shift(); }
     return to !== from;
   }
 }
 
 export const NB4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+export const NB8 = [[0, -1], [1, 0], [0, 1], [-1, 0], [1, 1], [-1, 1], [1, -1], [-1, -1]];
 let FOOD_ID = 1;
 export function makeFood(kind, r = Math.random, grown = 0) {
   return { id: FOOD_ID++, kind, bites: 0, max: kind === 'mushroom' ? 3 : 4, grow: grown, hue: r(), stage: 0 };

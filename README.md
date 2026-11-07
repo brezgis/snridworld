@@ -23,6 +23,10 @@ corner and the last few rolls in a little history strip.
 **Food has its own chain.** Fresh → overripe (fruit flies, worth less) → compost, which turns that square
 into lush moss. Mushrooms sprout in fog, rain and at night, especially beside fallen logs.
 
+**Wild berry bushes.** Every garden grows one to three of them (`%o%` in the tooltips), always in the same places for a given seed. Their six berries ripen from green buds to blushing to red, faster in rain and fog, slower in sun, and now and then a ripe one drops onto the ground beside the bush as an ordinary strawberry. Hover a bush to see how ripe it is and the chance a berry drops next tick.
+
+**Windfall.** When the weather turns stormy (a roll into rain, or now and then into fog), a gust can shake fruit off trees just past the edge of the map: one to three apples `( ' )` or cherry clusters tumble in near the rim, and leaves skitter across the ground downwind. A gust shows as `~>` in the weather history strip, and pressing `w` can set one off. Berries and windfall share a cap, so the garden never floods with fruit.
+
 **The snagents are MDP agents.** Each has its own reward function (dry soil hurts, lush moss is nice,
 lavender makes them sneeze, food is a goal), and crawling is stochastic: pebbles get you stuck, leaf
 litter makes you veer, puddles make you slide.

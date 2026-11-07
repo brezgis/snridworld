@@ -23,6 +23,8 @@ const flick = (now, h, rate, mod = 2) => ((now * rate + h * 17) | 0) % mod === 0
 
 // the big lavender bush at the heart of the patch
 const BUSH = ['.*:*:*.', ':\\|||/:', ' _|||_ '];
+// a wild berry bush: a round shrub on a little trunk (the berries themselves are drawn live on top)
+const BERRY_BUSH = [' ,%&%, ', '(%&%&%)', " `-Y-' "];
 const LAV = ['#9a7cc4', '#7d62b0', '#b49ad8', '#8a6cc0'];
 
 export function makeTextures(seed) {
@@ -109,6 +111,12 @@ export function makeTextures(seed) {
         if (h < .38) g = [flick(o.now, h, .5) ? R(['*', ':', '"'], h2) : R([':', "'", '*'], h2), R(LAV, h2)];   // flower spikes, swaying
         else if (h < .78) g = [R(['|', '/', '\\', '|', "'"], h2), R(['#7d9a6a', '#8fa87c', '#6f8a5c'], h)];        // grey-green stems
         else g = [' ', null];
+        break;
+      }
+      case T.BUSH: {
+        const c = BERRY_BUSH[o.lr] && BERRY_BUSH[o.lr][o.lc];
+        if (!c || c === ' ') { g = [R(['.', ',', "'"], h2), SOIL(.7)]; break; }
+        g = [c, '-`\'Y'.includes(c) ? BARK(.22) : c === '(' || c === ')' || c === ',' ? MOSS(.3) : MOSS(h < .5 ? .1 : .18)];
         break;
       }
       case T.VOID:   // past the edge: a few last grains, thinning out into paper

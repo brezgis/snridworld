@@ -28,17 +28,19 @@ let trail = new Map(), parts = [], floats = [], flies = [], butterflies = [];
 let NF1, NF2;
 
 const WET = t => t === T.PUDDLE || t === T.POND;
-const BASE_R = [-.25, 0, .03, .08, .04, 0, -.06, 0, .03, 0, -1.2, 0];   // reward for entering each tile type
+const BASE_R = [-.1, 0, .03, .08, .04, 0, -.06, 0, .03, 0, -1.2, 0, 0];   // dry soil was -.25: the learners spent whole days in the red   // reward for entering each tile type
 // soft ground colour per terrain, one pixel per character, smoothed up: the map reads as a patchwork, not noise
 const TINT_L = [
   [226, 188, 124, .2], [150, 112, 76, .17], [112, 186, 66, .18], [64, 150, 46, .26], [70, 145, 245, .24], [42, 112, 232, .4],
-  [140, 148, 160, .15], [218, 128, 46, .18], [140, 96, 60, .2], [100, 112, 130, .22], [162, 124, 218, .24], [0, 0, 0, 0],
+  [140, 148, 160, .15], [218, 128, 46, .18], [140, 96, 60, .2], [100, 112, 130, .22], [162, 124, 218, .24], [0, 0, 0, 0], [70, 140, 50, .24],
 ];
 const TINT_D = [
   [150, 120, 84, .05], [118, 98, 76, .12], [100, 150, 70, .15], [96, 172, 74, .22], [76, 134, 214, .24], [58, 110, 200, .34],
-  [150, 150, 150, .09], [200, 112, 46, .15], [150, 100, 60, .2], [150, 150, 145, .14], [160, 120, 220, .2], [0, 0, 0, 0],
+  [150, 150, 150, .09], [200, 112, 46, .15], [150, 100, 60, .2], [150, 150, 145, .14], [160, 120, 220, .2], [0, 0, 0, 0], [90, 150, 64, .2],
 ];
 const SPEEDS = [.25, .5, 1, 2, 4, 8];
+// how much wild food (berries off the bushes, windfall fruit) may lie on the ground at once
+const wildCap = () => 2 * world.bushes.length + 3;
 const SWEEPS = 12;                // value-iteration sweeps per sim second
 const SMELL = 5.5;                // tiles: how far a ripe meal's scent carries
 const DAY = 160;                  // sim seconds per day
@@ -58,7 +60,7 @@ const CAST = [
   { name: 'Gerald', pr: 'he', brain: 'plan', shell: '#b77a2e', spiral: '@', role: 'the gourmand', fav: 'cucumber',
     blurb: 'lives to eat. cucumber above all else.', R: { food: 1.7 } },
   { name: 'Pea', pr: 'she', brain: 'plan', shell: '#5a8fd8', spiral: 'e', role: 'the bather', fav: 'berry',
-    blurb: 'would live in a puddle if anyone let her.', R: { [T.PUDDLE]: .24, [T.SOIL]: -.45, [T.DAMP]: .02 } },
+    blurb: 'would live in a puddle if anyone let her.', R: { [T.PUDDLE]: .24, [T.SOIL]: -.3, [T.DAMP]: .02 } },
   { name: 'Mochi', pr: 'she', brain: 'plan', shell: '#b0606a', spiral: '&', role: 'the homebody', fav: 'mushroom',
     blurb: 'finds the plushest moss and stays put.', R: { [T.LUSH]: .17, [T.MOSS]: .07, [T.PEBBLE]: -.25, food: .8 } },
   { name: 'Fig', pr: 'he', brain: 'dyna', shell: '#8f8a3a', spiral: '%', role: 'the student', fav: 'berry',
@@ -173,7 +175,7 @@ function buildCharMap() {
   charTile = new Int32Array(n); charLX = new Float32Array(n); charLY = new Float32Array(n); shownT = new Uint8Array(n);
   charEdge = new Float32Array(n); charEA = new Float32Array(n);
   tileChars = Array.from({ length: world.n }, () => []);
-  const crisp = k => world.type[k] === T.LOG || k === world.bush;
+  const crisp = k => world.type[k] === T.LOG || world.type[k] === T.BUSH || k === world.bush;
   for (let gy = 0; gy < GR; gy++) for (let gx = 0; gx < GC; gx++) {
     const gi = gy * GC + gx, bx = gx / TW | 0, by = gy / TH | 0, b = world.idx(bx, by);
     // jitter which tile a character samples from, so the borders between terrains are ragged and organic
@@ -200,7 +202,13 @@ function makeSnagent(def, s, brain) {
     knows: new Set(), meals: 0, stillT: 0, lastS: s, stroll: 0, blocked: false, eggCD: rand(150, 240), age: def.baby ? 0 : 1e9, sleepT: 0, zT: 0, gen: def.gen || 1,
   };
 }
-const newBrain = k => k === 'plan' ? new Planner(world.n) : k === 'dyna' ? new Learner(world.n, 25) : k === 'q' ? new Learner(world.n, 0) : new Wanderer(world.n);
+function newBrain(k) {
+  const b = k === 'plan' ? new Planner(world.n) : k === 'dyna' ? new Learner(world.n, 25) : k === 'q' ? new Learner(world.n, 0) : new Wanderer(world.n);
+  // learners can see a boulder or the edge of the garden right in front of them: no optimism about crawling
+  // into one (otherwise they spent their first days bonking every wall to find out)
+  if (b.kind === 'learn') for (let s = 0; s < world.n; s++) for (let d = 0; d < 4; d++) if (!world.pass(world.nb(s, DIRS[d][0], DIRS[d][1]))) b.Q[s * 5 + d] = 0;
+  return b;
+}
 function spawnSnagents() {
   const keepSel = sel;
   snagents = [];
@@ -807,15 +815,20 @@ const FOOD_ART = {
   mushroom: { lines: [' .-. ', '(o.o)', ' )_( '], mask: [' ccc ', 'csdsc', ' ttt '] },
   cucumber: { lines: [' .-. ', '(:.:)', " `-' "], mask: [' rrr ', 'rfsfr', ' rrr '] },
   berry: { lines: [' \\V/ ', '(.:.)', ' \\_/ '], mask: [' lll ', 'rsrsr', ' rrr '] },
+  apple: { lines: ['  \\, ', "( ' )", " `-' "], mask: ['  sl ', 'r w r', ' rrr '] },
+  cherry: { lines: ['  ^  ', ' / \\ ', 'o   o'], mask: ['  s  ', ' s s ', 'r   r'] },
 };
 function foodColors(f) {
   const cap = f.hue < .6 ? '#c8503c' : f.hue < .85 ? '#a8743f' : '#d9a03a';
   const cols = f.kind === 'mushroom' ? { c: cap, s: '#f3e6c8', d: cap, t: '#b8a888' }
-    : f.kind === 'cucumber' ? { r: '#3f7f3a', f: '#8fc46e', s: '#b9b25e' } : { l: '#4f9a3a', r: '#d4455a', s: '#e0b23a' };
+    : f.kind === 'cucumber' ? { r: '#3f7f3a', f: '#8fc46e', s: '#b9b25e' }
+    : f.kind === 'apple' ? { l: '#5f9a37', r: '#c8403a', s: '#7a5a3a', w: '#f2c4b4' }
+    : f.kind === 'cherry' ? { s: '#5f8a3a', r: '#b8243a' } : { l: '#4f9a3a', r: '#d4455a', s: '#e0b23a' };
   if (f.stage) for (const k in cols) cols[k] = mixHex(cols[k], '#7a6248', .45);   // overripe: browning
   return cols;
 }
 function drawFood(c, i, f) {
+  if (f.showAt && S.t < f.showAt) return;   // still tumbling in
   const art = FOOD_ART[f.kind], tx = i % world.cols, ty = i / world.cols | 0;
   const show = f.grow >= 1 ? 3 : f.grow > .6 ? 2 : 1;   // mushrooms push up out of the moss
   const bob = f.kind === 'mushroom' ? 0 : Math.round(Math.sin(S.t * 1.5 + f.hue * 9) * .3);
@@ -830,10 +843,62 @@ function drawFood(c, i, f) {
     c.font = L.FONT;
   }
 }
+// the berries on each wild bush, live: hard green buds, blushing, then ripe red ones that glint
+const BERRY_SLOTS = [[2, 0], [4, 0], [1, 1], [3, 1], [5, 1], [3, 0]];
+function drawBerries(c) {
+  c.font = L.BOLD;
+  for (const b of world.bushes) {
+    const tx = b.i % world.cols, ty = b.i / world.cols | 0;
+    b.ber.forEach((v, k) => {
+      const [lc, lr] = BERRY_SLOTS[k], x = (tx * TW + lc) * L.CW, y = (ty * TH + lr) * L.CH;
+      if (v < .25) return;   // still a leaf bud: nothing to see yet
+      const ch = v >= 1 ? 'o' : v > .6 ? 'o' : '.', col = v >= 1 ? (Math.sin(S.t * 2 + k * 1.7) > .85 ? '#ff7a8a' : '#d4455a') : v > .6 ? '#c8783a' : '#8fb85a';
+      cut(c, ch, x, y, 3.2); c.fillStyle = C(col); c.fillText(ch, x, y);
+    });
+  }
+  c.font = L.FONT;
+}
 function drawEgg(c, e) {
   const [gx, gy] = tileCenter(e.s), k = e.t / e.hatch;
   const wob = k > .7 ? Math.round(Math.sin(S.t * 18 + e.wob) * (k - .7) * 3) : 0;
   drawArt(c, { lines: [k > .9 ? '0' : 'O'], mask: ['e'], colors: { e: '#b8a070' } }, gx + 1 + wob, gy + 2);
+}
+
+/* ================================================================ windfall */
+// when a storm comes up, a gust can shake fruit off trees just past the edge of the map: one to three
+// apples or cherry clusters tumble in near the rim, and leaves skitter across the ground downwind
+function maybeGust(force = false) {
+  const { from, to } = world.lastRoll || {};
+  const p = from === to ? (to === W.RAIN ? .05 : 0) : to === W.RAIN ? (from === W.SUN || from === W.CLOUD ? .6 : .3) : to === W.FOG ? .2 : 0;
+  if (!force && Math.random() >= p) return false;
+  world.gusts[world.gusts.length - 1] = true;
+  const dir = Math.random() < .5 ? 1 : -1;   // the wind blows toward +x or -x; fruit comes from the upwind side
+  let wild = 0; for (const f of world.food) if (f && f.wild) wild++;
+  const n = Math.min(1 + Math.floor(Math.random() * 3), wildCap() - wild);
+  const spots = [];
+  for (let i = 0; i < world.n; i++) {
+    const x = i % world.cols, y = i / world.cols | 0, e = world.edge(x + .5, y + .5);
+    if (!world.pass(i) || world.food[i] || world.type[i] === T.LAVENDER || world.type[i] === T.PUDDLE || e > .32) continue;
+    if ((x - world.cols / 2) * dir > world.cols * .1) continue;   // upwind half (and a bit), where the trees are
+    spots.push(i);
+  }
+  const t0 = S.t;
+  for (let k = 0; k < n && spots.length; k++) {
+    const i = spots.splice(Math.floor(Math.random() * spots.length), 1)[0];
+    const f = makeFood(Math.random() < .55 ? 'apple' : 'cherry', Math.random, 1);
+    f.wild = true; f.showAt = t0 + .7 + k * .25; world.food[i] = f;
+    const [gx, gy] = tileCenter(i);
+    parts.push({ t: 'fall', x0: gx - dir * rand(14, 24), y0: gy - rand(5, 9), x1: gx, y1: gy + 1, ch: f.kind === 'apple' ? '@' : '%', col: f.kind === 'apple' ? '#c8403a' : '#b8243a', life: .7 + k * .25, hop: 3 });
+  }
+  // leaves skittering downwind across what you can see
+  const gx0 = S.camX / L.CW, gy0 = S.camY / L.CH, w = L.W / L.CW, h = L.H / L.CH;
+  for (let k = 0; k < 56; k++) {
+    const pair = pick([['~', '-'], ['/', '\\'], ["'", ','], ['%', '&']]);
+    parts.push({ t: 'skitter', x: gx0 + rand(-10, w), y: gy0 + rand(0, h), vx: dir * rand(16, 30), life: rand(.7, 1.3), age: -rand(0, .35),
+      ch: pair[0], ch2: pair[1], ph: rand(0, 9), col: pick(['#c47a36', '#b4bc5a', '#8e4c2c', '#d0a06a', '#82a244']) });
+  }
+  for (const a of snagents) if (a.brain !== 'random' && a.state !== 'sleep' && Math.random() < .5) setSay(a, pick(['whoa, wind!', 'windy', 'something fell', 'what was that']), true);
+  return true;
 }
 
 /* ================================================================ particles */
@@ -865,6 +930,7 @@ function updateParts(dt, sdt) {
           ? { t: 'ripple', gx, gy, life: .7 } : { t: 'glyph', gx, gy, ch: pick(['.', ',', "'"]), col: 'rgba(80,140,230,1)', life: .3 });
       }
     } else if (p.t === 'scent') { p.x += p.vx * sdt; p.y += p.vy * sdt; if (p.age > p.life) p.dead = true; }
+    else if (p.t === 'fall' || p.t === 'skitter') { if (p.age > p.life) p.dead = true; }
     else if (p.age > p.life) p.dead = true;
   }
   parts = parts.filter(p => !p.dead);
@@ -898,6 +964,16 @@ function drawParts(c) {
       c.globalAlpha = Math.sin(k * Math.PI) * .45; c.fillStyle = C(p.col);
       c.fillText(p.ch, Math.round(p.x) * L.CW, Math.round(p.y) * L.CH);
       c.globalAlpha = 1;
+    } else if (p.t === 'fall') {   // a little arc from where it came off to where it lands
+      const k = clamp(p.age / p.life, 0, 1), x = lerp(p.x0, p.x1, k), y = lerp(p.y0, p.y1, k) - Math.sin(k * Math.PI) * (p.hop ?? 1.6);
+      c.font = L.BOLD; cut(c, p.ch, Math.round(x) * L.CW, y * L.CH, 3.4); c.fillStyle = C(p.col); c.fillText(p.ch, Math.round(x) * L.CW, y * L.CH); c.font = L.FONT;
+    } else if (p.t === 'skitter') {   // a leaf blown across the ground
+      if (p.age < 0) continue;
+      const k = p.age / p.life;
+      c.globalAlpha = Math.min(1, Math.sin(k * Math.PI) * 1.6); c.font = L.BOLD;
+      const ch = Math.sin(p.age * 18 + p.ph) > 0 ? p.ch : p.ch2, x = Math.round(p.x + p.vx * p.age) * L.CW, y = (p.y + Math.sin(p.age * 9 + p.ph) * .35) * L.CH;
+      cut(c, ch, x, y, 3.2); c.fillStyle = C(p.col); c.fillText(ch, x, y);
+      c.globalAlpha = 1; c.font = L.FONT;
     } else if (p.t === 'glyph') {
       if (p.age < 0) continue;
       const k = p.age / p.life;
@@ -940,8 +1016,14 @@ function update(dt) {
     S.tickT -= 1.5;
     const ch = world.step(S.night);
     for (const i of ch) { touch(i); fading.add(i); }
+    world.stepBushes(wildCap());
     for (const e of world.events) {
       const [gx, gy] = tileCenter(e.i);
+      if (e.t === 'drop') {   // a berry falls off the bush: a little hop from the bush to the ground
+        const [bx, by] = tileCenter(e.from);
+        parts.push({ t: 'fall', x0: bx, y0: by, x1: gx, y1: gy + 1, ch: 'o', col: '#d4455a', life: .55 });
+        floatText(gx - 1, gy, 'plop', '#c86a6a');
+      }
       if (e.t === 'compost') {
         floatText(gx - 3, gy, 'compost', '#6f8a4a');
         for (let k = 0; k < 4; k++) parts.push({ t: 'glyph', gx: gx + rand(-3, 3), gy: gy + rand(0, 2), ch: pick([',', "'", '"']), col: '#5f9a37', life: 1.2, vy: -.8 });
@@ -953,7 +1035,7 @@ function update(dt) {
     smell();
   }
   S.wxT += sdt;
-  if (S.wxT >= 7) { S.wxT -= 7; world.stepWeather(); }
+  if (S.wxT >= 7) { S.wxT -= 7; world.stepWeather(); maybeGust(); }
   for (const i of fading) {
     world.fade[i] = Math.min(1, world.fade[i] + sdt / 1.4);
     touch(i);
@@ -1016,6 +1098,7 @@ function render(dt) {
   worldT(ctx);
   ctx.save(); ctx.imageSmoothingEnabled = true; ctx.drawImage(tiny.shade.cv, 0, 0, L.gw, L.gh); ctx.restore();
   for (let i = 0; i < world.n; i++) if (world.food[i]) drawFood(ctx, i, world.food[i]);
+  drawBerries(ctx);
   for (const e of eggs) drawEgg(ctx, e);
   if (S.view) { blitVP(vp.over); worldT(ctx); }
   // night falls over the ground; the snagents stay legible on top of it
@@ -1136,7 +1219,7 @@ const clock = () => { const m = Math.floor(dayPhase() * 24 * 60); return `${Stri
 function ui() {
   const w = world.weather, day = Math.floor(S.sim / DAY + .3) + 1;
   $('#sub').textContent = `a markov garden · day ${day} ${clock()}${S.night > .5 ? ' (night)' : ''} · ${S.paused ? 'paused' : 'x' + S.speed}`;
-  let h = `<div class="hist">${world.history.map((k, i) => `<span class="w${k}" style="opacity:${(.3 + .7 * (i + 1) / world.history.length).toFixed(2)}">${WEATHER[k].glyph}</span>`).join('')}</div>`;
+  let h = `<div class="hist">${world.history.map((k, i) => `<span class="w${k}" style="opacity:${(.3 + .7 * (i + 1) / world.history.length).toFixed(2)}">${WEATHER[k].glyph}</span>${world.gusts[i] ? '<span class="gust" title="a gust: windfall">~&gt;</span>' : ''}`).join('')}</div>`;
   h += '<table><tr><th></th>' + WEATHER.map(x => `<th>${x.name}</th>`).join('') + '</tr>';
   WP.forEach((row, f) => {
     h += `<tr class="${f === w ? 'now' : ''}"><td>${f === w ? '&gt; ' : '  '}${WEATHER[f].name}</td>`
@@ -1235,6 +1318,12 @@ function tip() {
   const tr = world.transitions(i);
   if (tr.length > 1) h += `<br><span class="dim">next tick under ${WEATHER[world.weather].name}:</span><br>` + tr.filter(([, p]) => p > .001)
     .map(([k, p]) => `<span class="mono">${esc(pad(k === t ? 'stays' : '→ ' + TILE[k].key, 9))} ${bar(p, 8)} ${Math.round(p * 100)}%</span>`).join('<br>');
+  else if (t === T.BUSH) {
+    const b = world.bushInfo(i);
+    h += `<br><span class="mono">${bar(b.ripe / 6, 6)} ${b.ripe} ripe · ${b.ripening} blushing · ${b.green} green</span>`
+      + `<br><span class="dim">ripening ${b.wet > 1.5 ? 'fast (it is wet out)' : b.wet < 1 ? 'slowly (too sunny)' : 'steadily'}`
+      + `${b.ripe ? ` · ${Math.round(b.drop * 100)}% a berry drops next tick` : ''} · ${b.drops} dropped so far</span>`;
+  }
   else if (TILE[t].fixed) h += '<br><span class="dim">fixed: does not change</span>';
   const ft = world.foodTransitions(i);
   if (ft.length) h += `<br><span class="dim">the ${FOOD[f.kind].name}, next tick:</span><br>` + ft.map(([k, p]) => `<span class="mono">${esc(pad(k, 15))} ${bar(p, 6)} ${(p * 100).toFixed(1)}%</span>`).join('<br>');
@@ -1298,7 +1387,7 @@ function select(k, center) {
 const pan = (dx, dy) => { S.goal = { x: (S.goal?.x ?? S.camX) + dx, y: (S.goal?.y ?? S.camY) + dy }; S.follow = false; };
 const KEYS = {
   'v': () => { S.view = (S.view + 1) % 3; S.overT = 1; },
-  'w': () => { world.stepWeather(); S.wxT = 0; },
+  'w': () => { world.stepWeather(); S.wxT = 0; maybeGust(); },
   ' ': () => { S.paused = !S.paused; },
   '+': () => { S.speed = SPEEDS[(SPEEDS.indexOf(S.speed) + 1) % SPEEDS.length]; },
   '=': () => KEYS['+'](),
