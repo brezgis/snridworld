@@ -95,6 +95,9 @@ const LINES = {
 /* ================================================================ layout, camera & layers */
 function layout() {
   L.W = innerWidth; L.H = innerHeight; L.DPR = Math.min(2, devicePixelRatio || 1);
+  L.compact = L.W < 640 || L.H < 500;   // phones: panels fold into chips (see index.html)
+  document.documentElement.classList.toggle('compact', L.compact);
+  document.documentElement.classList.toggle('short', L.compact && L.H < 500 && L.W > L.H);
   L.FS = L.W < 640 ? 12 : 14;
   L.FONT = `${L.FS}px 'JetBrains Mono', ui-monospace, Menlo, monospace`;
   L.BOLD = `700 ${L.FS}px 'JetBrains Mono', ui-monospace, Menlo, monospace`;
@@ -166,8 +169,41 @@ function init() {
   spawnSnagents();
   for (let k = 0; k < 40; k++) sweepAll();
   S.waterT = S.atmoT = S.overT = S.uiT = 1;
-  lookAt(snagents[sel].s, true);   // open on the selected snagent, wherever they started
+  openingShot();
   makeTerrain();
+}
+
+// the first view should be lively, not a stretch of dry soil: score what each snagent would have around it
+// (moss, water, a berry bush, food, company, variety), select the best-placed one, and frame it with the
+// interesting bits leaning into view
+function openingShot() {
+  const vw = L.W / (TW * L.CW), vh = L.H / (TH * L.CH);   // the screen, in tiles
+  const rx = Math.max(3, Math.floor(vw / 2) - 1), ry = Math.max(2, Math.floor(vh / 2) - 1);
+  const score = (s0, wantPull) => {
+    const x0 = s0 % world.cols, y0 = s0 / world.cols | 0, kinds = new Set();
+    let sc = 0, px = 0, py = 0, pw = 0;
+    for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) {
+      const i = world.nb(s0, dx, dy); if (i < 0) continue;
+      const t = world.type[i]; if (t === T.VOID) { sc -= .4; continue; }
+      kinds.add(t);
+      let v = t === T.LUSH ? 1.5 : t === T.MOSS ? 1 : t === T.PUDDLE ? 1.8 : t === T.POND ? 1.2 : t === T.BUSH ? 9 : t === T.LOG ? 2.5 : t === T.LAVENDER ? 2 : t === T.SOIL ? -.3 : 0;
+      if (world.food[i]) v += 5;
+      sc += v;
+      if (v > 1.4) { px += dx * v; py += dy * v; pw += v; }
+    }
+    for (const o of snagents) { const d = tdist(o.s, s0); if (d > 0 && Math.abs(o.s % world.cols - x0) <= rx && Math.abs((o.s / world.cols | 0) - y0) <= ry) sc += 6; }
+    sc += kinds.size * 2.5;
+    return wantPull ? [pw ? px / pw : 0, pw ? py / pw : 0] : sc;
+  };
+  let best = 0, bs = -1e9;
+  snagents.forEach((a, k) => { if (a.brain === 'random') return; const v = score(a.s); if (v > bs) { bs = v; best = k; } });
+  sel = best;
+  const a = snagents[sel], [mx, my] = score(a.s, true);
+  // lean toward the good stuff, but keep the snail well inside the frame
+  const ox = clamp(mx * .6, -vw * .28, vw * .28), oy = clamp(my * .6, -vh * .25, vh * .25);
+  S.camX = ((a.s % world.cols) + .5 + ox) * TW * L.CW - L.W / 2;
+  S.camY = (((a.s / world.cols) | 0) + .5 + oy) * TH * L.CH - L.H / 2;
+  clampCam(); S.goal = null;
 }
 
 function buildCharMap() {
@@ -262,6 +298,16 @@ function nearestKnown(a) {
     const d = tdist(a.s, i); if (d < bd) { bd = d; best = i; }
   }
   return best;
+}
+// what a snagent has smelled only matters while the food is still there: forget the rest (and never hold more
+// than 64 scents, oldest first), so long-running gardens do not pile up memories of meals long gone
+function pruneKnows() {
+  const live = new Set();
+  for (const f of world.food) if (f) live.add(f.id);
+  for (const a of snagents) {
+    for (const id of a.knows) if (!live.has(id)) a.knows.delete(id);
+    while (a.knows.size > 64) a.knows.delete(a.knows.values().next().value);
+  }
 }
 // who can smell what: scent reaches SMELL tiles. noticing is a little event, with a '!' and a reaction
 function smell() {
@@ -1035,6 +1081,7 @@ function update(dt) {
     }
     model.rebuild();
     smell();
+    pruneKnows();
   }
   S.wxT += sdt;
   if (S.wxT >= 7) { S.wxT -= 7; world.stepWeather(); maybeGust(); }
@@ -1269,6 +1316,7 @@ function ui() {
     + TOOLS.map(t => `<button data-tool="${t.id}" class="${S.tool === t.id ? 'on armed' : ''}" title="${S.tool === t.id ? 'put away' : 'pick up'} the ${t.label}"><pre>${esc(t.icon)}</pre><span>${t.key} ${t.label}</span></button>`).join('')
     + '<div class="sep"></div>'
     + `<button data-k="menu" class="mb ${S.menu ? 'on' : ''}"><pre>${S.menu ? '[x]' : '[=]'}</pre><span>menu</span></button>`);
+  if (L.compact) { const th = $('#tools').offsetHeight; if (th !== L.toolsH) { L.toolsH = th; document.documentElement.style.setProperty('--toolsH', th + 'px'); } }
   const menu = $('#menu');
   menu.classList.toggle('show', S.menu);
   if (S.menu) {
@@ -1382,7 +1430,7 @@ function useTool(i) {
 }
 function select(k, center) {
   if (k === sel) setSay(snagents[k], snagents[k].brain === 'random' ? pick(['!', '?', ':)']) : pick(['<3', 'hi', 'oh!', 'hehe']), true);
-  else S.cardOpen = true;
+  else if (!L.compact) S.cardOpen = true;   // on a phone the card stays a two-line sheet until tapped
   sel = k; S.overT = 1;
   if (center) lookAt(snagents[k].s);
 }
@@ -1415,45 +1463,61 @@ addEventListener('keydown', e => {
   else return;
   S.uiT = 1;
 });
-// click to act, drag to wander the garden
+// click (or tap) to act, drag to wander the garden. on touch there is no hover, so a long press on a tile shows
+// what hovering would: its tooltip, transition odds and all. a tap never doubles as anything else
+let pressT = 0;
 cv.addEventListener('pointerdown', e => {
-  S.mx = e.clientX; S.my = e.clientY;
-  S.drag = { x: e.clientX, y: e.clientY, cx: S.camX, cy: S.camY, moved: false };
-  cv.setPointerCapture(e.pointerId);
+  S.mx = e.clientX; S.my = e.clientY; S.touch = e.pointerType !== 'mouse';
+  S.drag = { x: e.clientX, y: e.clientY, cx: S.camX, cy: S.camY, moved: false, long: false };
+  try { cv.setPointerCapture(e.pointerId); } catch { }
+  clearTimeout(pressT);
+  if (S.touch) {
+    S.hover = -1; S.uiT = 1;   // a new touch clears the last tooltip
+    const d = S.drag;
+    pressT = setTimeout(() => { if (S.drag === d && !d.moved) { d.long = true; S.hover = tileAt(d.x, d.y); S.uiT = 1; navigator.vibrate?.(8); } }, 480);
+  }
+  $('#title').classList.remove('open'); if (L.compact) $('#cast').classList.remove('open');
 });
 cv.addEventListener('pointermove', e => {
   S.mx = e.clientX; S.my = e.clientY;
   const d = S.drag;
   if (d) {
-    if (!d.moved && Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) { d.moved = true; S.goal = null; S.follow = false; cv.classList.add('grabbing'); }
+    if (!d.moved && !d.long && Math.hypot(e.clientX - d.x, e.clientY - d.y) > (S.touch ? 10 : 6)) { d.moved = true; S.goal = null; S.follow = false; cv.classList.add('grabbing'); clearTimeout(pressT); }
     if (d.moved) { S.camX = d.cx - (e.clientX - d.x); S.camY = d.cy - (e.clientY - d.y); clampCam(); }
   }
-  S.hover = tileAt(e.clientX, e.clientY);
-  cv.classList.toggle('over', !d?.moved && snagentAt(e.clientX, e.clientY) >= 0);
-  cv.classList.toggle('armed', !!S.tool);
+  if (e.pointerType === 'mouse') {
+    S.hover = tileAt(e.clientX, e.clientY);
+    cv.classList.toggle('over', !d?.moved && snagentAt(e.clientX, e.clientY) >= 0);
+    cv.classList.toggle('armed', !!S.tool);
+  }
 });
 cv.addEventListener('pointerup', e => {
+  clearTimeout(pressT);
   const d = S.drag; S.drag = null; cv.classList.remove('grabbing');
-  if (!d || d.moved) return;
+  if (!d || d.moved || d.long) return;   // a pan or a long press is not also a tap
   const k = snagentAt(e.clientX, e.clientY);
   if (k >= 0) select(k);
   else if (S.tool) { const i = tileAt(e.clientX, e.clientY); if (i >= 0) useTool(i); }
-  S.hover = tileAt(e.clientX, e.clientY); S.uiT = 1;
-});
-cv.addEventListener('pointercancel', () => { S.drag = null; cv.classList.remove('grabbing'); });
-cv.addEventListener('pointerleave', () => { if (!S.drag) S.hover = -1; });
-cv.addEventListener('wheel', e => { e.preventDefault(); S.goal = null; S.follow = false; S.camX += e.deltaX; S.camY += e.deltaY; clampCam(); }, { passive: false });
-$('#cast').addEventListener('pointerdown', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  if (b.dataset.kids) { const k = b.dataset.kids; if (S.kids.has(k)) S.kids.delete(k); else S.kids.add(k); }
-  else select(+b.dataset.i, true);
+  if (e.pointerType === 'mouse') S.hover = tileAt(e.clientX, e.clientY);
   S.uiT = 1;
 });
-$('#card').addEventListener('pointerdown', () => { S.cardOpen = !S.cardOpen; S.uiT = 1; });
-$('#menu').addEventListener('pointerdown', e => {
+cv.addEventListener('pointercancel', () => { clearTimeout(pressT); S.drag = null; cv.classList.remove('grabbing'); });
+cv.addEventListener('pointerleave', e => { if (!S.drag && e.pointerType === 'mouse') S.hover = -1; });
+cv.addEventListener('contextmenu', e => e.preventDefault());   // a long press is ours, not the browser's
+cv.addEventListener('wheel', e => { e.preventDefault(); S.goal = null; S.follow = false; S.camX += e.deltaX; S.camY += e.deltaY; clampCam(); }, { passive: false });
+$('#cast').addEventListener('click', e => {
+  if (e.target.closest('.hd')) { if (L.compact) $('#cast').classList.toggle('open'); return; }
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.kids) { const k = b.dataset.kids; if (S.kids.has(k)) S.kids.delete(k); else S.kids.add(k); }
+  else { select(+b.dataset.i, true); if (L.compact) $('#cast').classList.remove('open'); }
+  S.uiT = 1;
+});
+$('#title').addEventListener('click', () => { if (L.compact) $('#title').classList.toggle('open'); });
+$('#card').addEventListener('click', () => { S.cardOpen = !S.cardOpen; S.uiT = 1; });
+$('#menu').addEventListener('click', e => {
   const b = e.target.closest('button'); if (b) { KEYS[b.dataset.k](); S.uiT = 1; }
 });
-$('#tools').addEventListener('pointerdown', e => {
+$('#tools').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.tool) S.tool = S.tool === b.dataset.tool ? null : b.dataset.tool; else KEYS[b.dataset.k]();
   S.uiT = 1;
@@ -1462,8 +1526,20 @@ let resizeT = 0;
 addEventListener('resize', () => {
   clearTimeout(resizeT);
   resizeT = setTimeout(() => {
-    const fs = L.FS; layout();
-    if (L.FS !== fs) { init(); return; }
+    const fs = L.FS, ow = L.W, oh = L.H, ocw = L.CW, och = L.CH;
+    const cx = (S.camX + ow / 2) / ocw, cy = (S.camY + oh / 2) / och;   // the character at the middle of the screen
+    layout();
+    if (L.FS !== fs) {
+      // the font size changed (crossing the phone breakpoint): same garden, same snails, same everything, just
+      // re-laid out at the new character size, still looking at the same spot
+      L.gw = L.GC * L.CW; L.gh = L.GR * L.CH;
+      const kx = L.CW / ocw, ky = L.CH / och;
+      for (const f of flies) { f.x *= kx; f.y *= ky; }
+      for (const b of butterflies) { b.x *= kx; b.y *= ky; }
+      floats = []; parts = parts.filter(p => p.t !== 'rain');
+      S.camX = cx * L.CW - L.W / 2; S.camY = cy * L.CH - L.H / 2; S.goal = null;
+      redrawAll();
+    }
     vp = { water: mkVP(), atmo: mkVP(), over: mkVP() };
     clampCam(); makeTerrain(); S.waterT = S.atmoT = S.overT = 1;
   }, 250);
@@ -1472,6 +1548,6 @@ addEventListener('resize', () => {
 setTheme(true);   // the garden is made for the dark; d switches to the old paper look
 document.fonts.load(`12px 'JetBrains Mono'`).finally(() => {
   init();
-  if (S.test) window.SR = { S, get world() { return world; }, get snagents() { return snagents; }, get eggs() { return eggs; }, step: dt => { update(dt); }, render: () => { render(1); ui(); }, frame: dt => render(dt), KEYS, lookAt };
+  if (S.test) window.SR = { S, get world() { return world; }, get snagents() { return snagents; }, get eggs() { return eggs; }, step: dt => { update(dt); }, render: () => { render(1); ui(); }, frame: dt => render(dt), KEYS, lookAt, L, get sel() { return sel; } };
   else requestAnimationFrame(frame);
 });

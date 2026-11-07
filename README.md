@@ -70,6 +70,7 @@ snagent's card has a little ascii learning curve, so you can watch the learners 
 | `space` / `-` `+` | pause / speed |
 | `n` | a new garden |
 | `d` | the old paper look, or back to the dark garden |
+| on a phone | drag pans · tap a snail to select it, or tap the ground to use the tool in hand · long-press a tile for its tooltip (odds, bush ripeness) · tap the title or the `snagents` chip to unfold the weather or the cast |
 | `?seed=123` in the url | open a particular garden (the same seed always grows the same garden) |
 
 ## running it
