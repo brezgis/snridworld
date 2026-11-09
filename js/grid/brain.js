@@ -97,7 +97,11 @@ export class Planner {
   greedy(s) { return argmax(this.Q, s, () => .5); }
 }
 
-// learns only from what happens to it. replay > 0 makes it dyna-q: it daydreams old transitions between steps
+// learns only from what happens to it. replay > 0 makes it dyna-q: it daydreams old transitions between steps.
+// the garden is random (leaves veer you, pebbles stick you), so each remembered move keeps every outcome it has
+// led to, weighted by how often, and a daydream samples from those. the weights fade a little with each new try
+// (OUT_FADE), because the garden also changes: a meal that was eaten shouldn't be outvoted by old visits forever.
+const OUT_FADE = .95, OUT_MAX = 6;
 export class Learner {
   constructor(n, replay = 0) {
     this.kind = 'learn'; this.replay = replay;
@@ -108,24 +112,44 @@ export class Learner {
   act(s, rng = Math.random) { return rng() < this.eps(s) ? Math.floor(rng() * 5) : argmax(this.Q, s, rng); }
   maxQ(s) { let m = -1e9; for (let a = 0; a < 5; a++) m = Math.max(m, this.Q[s * 5 + a]); return m; }
   upd(s, a, r, s2, done) { const i = s * 5 + a; this.Q[i] += this.alpha * (r + (done ? 0 : GAMMA * this.maxQ(s2)) - this.Q[i]); }
-  // returns what it remembered about this move before, so the snail can be surprised
+  // returns the last thing this move did before, so the snail can be surprised
   learn(s, a, r, s2, done) {
     this.visits[s]++;
     this.upd(s, a, r, s2, done);
-    const key = s * 5 + a, before = this.mem.get(key);
+    const key = s * 5 + a, m = this.mem.get(key), before = m && m.last;
     if (this.replay) {
-      if (!before) this.keys.push(key);
-      this.mem.set(key, [r, s2, done]);
+      if (!m) { this.keys.push(key); this.mem.set(key, { outs: [[r, s2, done, 1]], last: [r, s2, done] }); }
+      else {
+        let hit = null;
+        for (const o of m.outs) { o[3] *= OUT_FADE; if (o[0] === r && o[1] === s2 && o[2] === done) hit = o; }
+        if (hit) hit[3] += 1;
+        else { m.outs.push([r, s2, done, 1]); if (m.outs.length > OUT_MAX) { m.outs.sort((x, y) => y[3] - x[3]); m.outs.length = OUT_MAX; } }
+        m.last = [r, s2, done];
+      }
       for (let k = 0; k < this.replay; k++) {
-        const kk = this.keys[Math.floor(Math.random() * this.keys.length)], [rr, ss, dd] = this.mem.get(kk);
+        const kk = this.keys[Math.floor(Math.random() * this.keys.length)], [rr, ss, dd] = this.dream(this.mem.get(kk));
         this.upd(kk / 5 | 0, kk % 5, rr, ss, dd);
       }
     }
     return before;
   }
+  // one outcome of a remembered move, drawn in proportion to how often (lately) it happened
+  dream(m) {
+    let tot = 0; for (const o of m.outs) tot += o[3];
+    let u = Math.random() * tot;
+    for (const o of m.outs) if ((u -= o[3]) < 0) return o;
+    return m.outs[m.outs.length - 1];
+  }
   // a meal at tile i is gone: remembered moves that ended there now remember just the empty tile
   forget(i, r) {
-    for (const [k, m] of this.mem) if (m[1] === i && m[2]) this.mem.set(k, [r, i, false]);
+    const gone = (o) => o[1] === i && o[2];
+    for (const m of this.mem.values()) {
+      if (!m.outs.some(gone)) continue;
+      let w = 0; m.outs = m.outs.filter((o) => (gone(o) ? ((w += o[3]), false) : true));
+      const same = m.outs.find((o) => o[0] === r && o[1] === i && !o[2]);
+      if (same) same[3] += w; else m.outs.push([r, i, false, w]);
+      if (m.last[1] === i && m.last[2]) m.last = [r, i, false];
+    }
   }
   value(s) { return this.maxQ(s); }
   greedy(s) { return argmax(this.Q, s, () => .5); }
